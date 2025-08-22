@@ -53,23 +53,23 @@ export function Select({
               children
             )}
           </select>
-          <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+          <label 
+            htmlFor={selectId} 
+            className={clsx(
+              'floating-label',
+              {
+                'text-destructive': error,
+                'text-success': success,
+                'peer-focus:text-primary': !error && !success,
+              }
+            )}
+          >
+            {label}
+          </label>
+          <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none z-30">
             <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform peer-focus:rotate-180" />
           </div>
         </div>
-        <label 
-          htmlFor={selectId} 
-          className={clsx(
-            'floating-label',
-            {
-              'text-destructive': error,
-              'text-success': success,
-              'peer-focus:text-primary': !error && !success,
-            }
-          )}
-        >
-          {label}
-        </label>
         {error && (
           <p className="text-sm text-destructive mt-1 animate-in fade-in duration-200">
             {error}
@@ -122,7 +122,7 @@ export function Select({
             children
           )}
         </select>
-        <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+        <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none z-30">
           <ChevronDown className="h-4 w-4 text-muted-foreground" />
         </div>
       </div>
