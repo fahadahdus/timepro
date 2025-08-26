@@ -96,7 +96,7 @@ export interface ProjectEntry {
 export interface CostEntry {
   id: string
   day_entry_id: string
-  type: 'travel' | 'accommodation' | 'meal' | 'other'
+  type: 'car' | 'train' | 'flight' | 'taxi' | 'hotel' | 'meal' | 'other'
   distance_km: number | null
   gross_amount: number
   vat_percentage: number

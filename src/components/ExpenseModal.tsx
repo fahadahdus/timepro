@@ -11,7 +11,7 @@ interface ExpenseModalProps {
   isOpen: boolean
   onClose: () => void
   onSave: (data: {
-    type: 'travel' | 'accommodation' | 'meal' | 'other'
+    type: 'car' | 'train' | 'flight' | 'taxi' | 'hotel' | 'meal' | 'other'
     distance_km?: number
     gross_amount: number
     vat_percentage: number
@@ -20,12 +20,12 @@ interface ExpenseModalProps {
   }) => void
   date: string
   editingExpense?: CostEntry
-  recentExpenseTypes?: ('travel' | 'accommodation' | 'meal' | 'other')[]
+  recentExpenseTypes?: ('car' | 'train' | 'flight' | 'taxi' | 'hotel' | 'meal' | 'other')[]
 }
 
 export function ExpenseModal({ isOpen, onClose, onSave, date, editingExpense, recentExpenseTypes = [] }: ExpenseModalProps) {
   const [formData, setFormData] = useState({
-    type: 'travel' as 'travel' | 'accommodation' | 'meal' | 'other',
+    type: 'car' as 'car' | 'train' | 'flight' | 'taxi' | 'hotel' | 'meal' | 'other',
     distance_km: '',
     gross_amount: '',
     vat_percentage: '20',
@@ -47,7 +47,7 @@ export function ExpenseModal({ isOpen, onClose, onSave, date, editingExpense, re
       })
     } else {
       // Smart prefilling for new expenses
-      const smartType = recentExpenseTypes.length > 0 ? recentExpenseTypes[0] : 'travel'
+      const smartType = recentExpenseTypes.length > 0 ? recentExpenseTypes[0] : 'car'
       setFormData({
         type: smartType,
         distance_km: '',
@@ -79,7 +79,7 @@ export function ExpenseModal({ isOpen, onClose, onSave, date, editingExpense, re
       newErrors.vat_percentage = 'Please enter a valid VAT percentage'
     }
     
-    if (formData.type === 'travel' && formData.distance_km && parseFloat(formData.distance_km) <= 0) {
+    if ((formData.type === 'car' || formData.type === 'taxi') && formData.distance_km && parseFloat(formData.distance_km) <= 0) {
       newErrors.distance_km = 'Distance must be greater than 0'
     }
     
@@ -137,8 +137,11 @@ export function ExpenseModal({ isOpen, onClose, onSave, date, editingExpense, re
               onChange={(e) => handleInputChange('type', e.target.value)}
               variant="floating"
               options={[
-                { value: 'travel', label: 'Travel' },
-                { value: 'accommodation', label: 'Accommodation' },
+                { value: 'car', label: 'Car' },
+                { value: 'train', label: 'Train' },
+                { value: 'flight', label: 'Flight' },
+                { value: 'taxi', label: 'Taxi' },
+                { value: 'hotel', label: 'Hotel' },
                 { value: 'meal', label: 'Meal' },
                 { value: 'other', label: 'Other' }
               ]}
@@ -163,7 +166,7 @@ export function ExpenseModal({ isOpen, onClose, onSave, date, editingExpense, re
               </div>
             )}
             
-            {formData.type === 'travel' && (
+            {(formData.type === 'car' || formData.type === 'taxi') && (
               <Input
                 type="number"
                 label="Distance (km)"

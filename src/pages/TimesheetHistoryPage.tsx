@@ -357,9 +357,25 @@ export function TimesheetHistoryPage() {
               <div className="space-y-3">
                 {weekDetails.map((day: any) => {
                   const date = parseISO(day.date)
-                  const hours = day.time_in && day.time_out ? 
-                    ((new Date(`2000-01-01T${day.time_out}`).getTime() - new Date(`2000-01-01T${day.time_in}`).getTime()) / (1000 * 60 * 60)).toFixed(1) : 
-                    '0'
+                  const hours = (() => {
+                    if (!day.time_in || !day.time_out) return '0'
+                    try {
+                      const timeIn = day.time_in.includes(':') ? day.time_in : '00:00'
+                      const timeOut = day.time_out.includes(':') ? day.time_out : '00:00'
+                      const startTime = new Date(`2000-01-01T${timeIn}:00`)
+                      const endTime = new Date(`2000-01-01T${timeOut}:00`)
+                      
+                      if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
+                        return '0'
+                      }
+                      
+                      const hoursDiff = (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60)
+                      return Math.abs(hoursDiff).toFixed(1)
+                    } catch (error) {
+                      console.error('Error calculating hours:', error)
+                      return '0'
+                    }
+                  })()
                   
                   return (
                     <div key={day.id} className="border border-border rounded-lg p-4">

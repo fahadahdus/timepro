@@ -6,6 +6,7 @@ interface AuthContextType {
   loading: boolean
   signIn: (email: string, password: string) => Promise<any>
   signOut: () => Promise<void>
+  refreshSessionIfNeeded: () => Promise<boolean>
   isAdmin: boolean
   isConsultant: boolean
 }
@@ -16,29 +17,81 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // Helper function to load user profile
+  const loadUserProfile = async (authUser: any) => {
+    if (!authUser?.email) {
+      setUser(null)
+      return
+    }
+
+    try {
+      const { data: userProfile, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', authUser.email)
+        .maybeSingle()
+
+      if (error) {
+        console.error('Error loading user profile:', error)
+        setUser(null)
+      } else {
+        setUser(userProfile)
+      }
+    } catch (error) {
+      console.error('Error in loadUserProfile:', error)
+      setUser(null)
+    }
+  }
+
+  // Helper function to refresh session when needed
+  const refreshSessionIfNeeded = async () => {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession()
+      if (error) {
+        console.error('Error getting session:', error)
+        return false
+      }
+
+      if (session) {
+        // Check if session is about to expire (within 5 minutes)
+        const expiresAt = session.expires_at ? session.expires_at * 1000 : 0
+        const timeUntilExpiry = expiresAt - Date.now()
+        
+        if (timeUntilExpiry < 5 * 60 * 1000) { // Less than 5 minutes
+          console.log('Session expiring soon, refreshing...')
+          const { data, error: refreshError } = await supabase.auth.refreshSession()
+          
+          if (refreshError) {
+            console.error('Error refreshing session:', refreshError)
+            return false
+          }
+          
+          if (data.session) {
+            console.log('Session refreshed successfully')
+            return true
+          }
+        }
+        return true
+      }
+      
+      return false
+    } catch (error) {
+      console.error('Error in refreshSessionIfNeeded:', error)
+      return false
+    }
+  }
+
   useEffect(() => {
+    // Load user on mount (one-time check)
     async function loadUser() {
+      setLoading(true)
       try {
         const { data: { user: authUser }, error } = await supabase.auth.getUser()
         if (error || !authUser) {
           setUser(null)
-          return
+        } else {
+          await loadUserProfile(authUser)
         }
-
-        // Get user profile from our users table
-        const { data: userProfile, error: profileError } = await supabase
-          .from('users')
-          .select('*')
-          .eq('email', authUser.email)
-          .maybeSingle()
-
-        if (profileError) {
-          console.error('Error loading user profile:', profileError)
-          setUser(null)
-          return
-        }
-
-        setUser(userProfile)
       } catch (error) {
         console.error('Error in loadUser:', error)
         setUser(null)
@@ -49,28 +102,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     loadUser()
 
-    // Set up auth listener
+    // Set up auth listener - KEEP SIMPLE, avoid any async operations in callback
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      (_event, session) => {
+        // NEVER use any async operations in callback
         if (session?.user) {
-          try {
-            // Get user profile from our users table
-            const { data: userProfile, error } = await supabase
-              .from('users')
-              .select('*')
-              .eq('email', session.user.email)
-              .maybeSingle()
-            
-            if (error) {
-              console.error('Error loading user profile in auth listener:', error)
-              setUser(null)
-            } else {
-              setUser(userProfile)
-            }
-          } catch (error) {
-            console.error('Error in auth state change listener:', error)
-            setUser(null)
-          }
+          // Load user profile in a separate async function outside the callback
+          loadUserProfile(session.user)
         } else {
           setUser(null)
         }
@@ -108,7 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isConsultant = user?.role === 'consultant'
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, isAdmin, isConsultant }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signOut, refreshSessionIfNeeded, isAdmin, isConsultant }}>
       {children}
     </AuthContext.Provider>
   )

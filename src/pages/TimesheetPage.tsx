@@ -19,7 +19,7 @@ interface TimesheetFormData {
 }
 
 export function TimesheetPage() {
-  const { user } = useAuth()
+  const { user, refreshSessionIfNeeded } = useAuth()
   const isMobile = useIsMobile()
   const [currentWeekStart, setCurrentWeekStart] = useState(
     startOfWeek(new Date(), { weekStartsOn: 1 }) // Monday start
@@ -45,7 +45,7 @@ export function TimesheetPage() {
     lastCity: '',
     lastCountry: '',
     recentProjects: [] as string[],
-    recentExpenseTypes: [] as ('travel' | 'accommodation' | 'meal' | 'other')[],
+    recentExpenseTypes: [] as ('car' | 'train' | 'flight' | 'taxi' | 'hotel' | 'meal' | 'other')[],
     projectDefaults: new Map<string, {
       location: 'remote' | 'onsite'
       man_days: number
@@ -165,13 +165,15 @@ export function TimesheetPage() {
       // Create empty day entries for the whole week
       weekDays.forEach(day => {
         const dateStr = format(day, 'yyyy-MM-dd')
+        const isWeekend = day.getDay() === 0 || day.getDay() === 6 // Sunday = 0, Saturday = 6
+        
         dayEntriesRecord[dateStr] = {
           id: '',
           week_id: currentWeek.id || '',
           date: dateStr,
           time_in: null,
           time_out: null,
-          status: 'active',
+          status: isWeekend ? 'day_off' : 'active', // Default weekends to day_off
           allowance_amount: 0,
           work_from: null,
           city: null,
@@ -481,61 +483,34 @@ export function TimesheetPage() {
     if (!user || !currentModalDate) return
 
     try {
-      const dayEntry = data.dayEntries[currentModalDate]
-      if (!dayEntry?.id) {
-        // If dayEntry doesn't exist, create it first
-        const { data: newDayEntry, error: dayError } = await supabase
-          .from('day_entries')
-          .insert({
-            week_id: data.week?.id || '',
-            date: currentModalDate,
-            status: 'active',
-            allowance_amount: 0
-          })
-          .select()
-          .single()
-
-        if (dayError) throw dayError
+      if (editingProjectId) {
+        // Update existing project entry via direct database call
+        const dayEntry = data.dayEntries[currentModalDate]
+        if (!dayEntry?.id) return
         
-        // Update local state with new day entry
-        setData(prev => ({
-          ...prev,
-          dayEntries: {
-            ...prev.dayEntries,
-            [currentModalDate]: newDayEntry
-          }
-        }))
-        
-        // Use the new day entry for the project entry
         const { error } = await supabase
           .from('project_entries')
-          .insert({
-            ...projectData,
-            day_entry_id: newDayEntry.id,
-            invoiced: false
-          })
+          .update(projectData)
+          .eq('id', editingProjectId)
         
         if (error) throw error
       } else {
-        if (editingProjectId) {
-          // Update existing project entry
-          const { error } = await supabase
-            .from('project_entries')
-            .update(projectData)
-            .eq('id', editingProjectId)
-          
-          if (error) throw error
-        } else {
-          // Create new project entry
-          const { error } = await supabase
-            .from('project_entries')
-            .insert({
-              ...projectData,
-              day_entry_id: dayEntry.id,
-              invoiced: false
-            })
-          
-          if (error) throw error
+        // Create new project entry via edge function
+        const { data: result, error } = await supabase.functions.invoke('create-project-entry', {
+          body: {
+            date: currentModalDate,
+            projectData
+          }
+        })
+        
+        if (error) {
+          console.error('Edge function error:', error)
+          throw new Error('Failed to create project entry')
+        }
+        
+        if (!result.success) {
+          console.error('Project creation failed:', result.error)
+          throw new Error(result.error || 'Failed to create project entry')
         }
       }
 
@@ -562,11 +537,13 @@ export function TimesheetPage() {
       closeModals()
     } catch (error) {
       console.error('Error saving project entry:', error)
+      // You might want to show a user-friendly error message here
+      alert('Failed to save project entry. Please try again.')
     }
   }
 
   const saveCostEntry = async (costData: {
-    type: 'travel' | 'accommodation' | 'meal' | 'other'
+    type: 'car' | 'train' | 'flight' | 'taxi' | 'hotel' | 'meal' | 'other'
     distance_km?: number
     gross_amount: number
     vat_percentage: number
@@ -576,81 +553,59 @@ export function TimesheetPage() {
     if (!user || !currentModalDate) return
 
     try {
-      const dayEntry = data.dayEntries[currentModalDate]
-      if (!dayEntry?.id) {
-        // If dayEntry doesn't exist, create it first
-        const { data: newDayEntry, error: dayError } = await supabase
-          .from('day_entries')
-          .insert({
-            week_id: data.week?.id || '',
-            date: currentModalDate,
-            status: 'active',
-            allowance_amount: 0
-          })
-          .select()
-          .single()
-
-        if (dayError) throw dayError
+      if (editingExpenseId) {
+        // Update existing cost entry via direct database call
+        const dayEntry = data.dayEntries[currentModalDate]
+        if (!dayEntry?.id) return
         
-        // Update local state with new day entry
-        setData(prev => ({
-          ...prev,
-          dayEntries: {
-            ...prev.dayEntries,
-            [currentModalDate]: newDayEntry
-          }
-        }))
-        
-        // Calculate net amount
         const net_amount = costData.gross_amount / (1 + costData.vat_percentage / 100)
-
         const entryData = {
           ...costData,
           net_amount,
           distance_km: costData.distance_km || null,
           notes: costData.notes || null
         }
-
-        // Use the new day entry for the cost entry
+        
         const { error } = await supabase
           .from('cost_entries')
-          .insert({
-            ...entryData,
-            day_entry_id: newDayEntry.id,
-            invoiced: false
-          })
+          .update(entryData)
+          .eq('id', editingExpenseId)
         
         if (error) throw error
       } else {
-        // Calculate net amount
-        const net_amount = costData.gross_amount / (1 + costData.vat_percentage / 100)
-
-        const entryData = {
-          ...costData,
-          net_amount,
-          distance_km: costData.distance_km || null,
-          notes: costData.notes || null
+        // Refresh session before creating cost entry to avoid session expiration
+        console.log('Refreshing session before creating cost entry...')
+        const sessionRefreshed = await refreshSessionIfNeeded()
+        if (!sessionRefreshed) {
+          console.error('Session refresh failed')
+          throw new Error('Session expired. Please log in again.')
         }
-
-        if (editingExpenseId) {
-          // Update existing cost entry
-          const { error } = await supabase
-            .from('cost_entries')
-            .update(entryData)
-            .eq('id', editingExpenseId)
-          
-          if (error) throw error
-        } else {
-          // Create new cost entry
-          const { error } = await supabase
-            .from('cost_entries')
-            .insert({
-              ...entryData,
-              day_entry_id: dayEntry.id,
-              invoiced: false
-            })
-          
-          if (error) throw error
+        
+        // Get current session to ensure we have a valid token
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.access_token) {
+          throw new Error('No valid session token. Please log in again.')
+        }
+        
+        // Create new cost entry via edge function with explicit auth header
+        const { data: result, error } = await supabase.functions.invoke('create-cost-entry', {
+          body: {
+            date: currentModalDate,
+            costData
+          },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`
+          }
+        })
+        
+        if (error) {
+          console.error('Edge function error:', error)
+          throw new Error('Failed to create cost entry')
+        }
+        
+        if (!result.success) {
+          console.error('Cost entry creation failed:', result.error)
+          throw new Error(result.error || 'Failed to create cost entry')
         }
       }
 
@@ -668,6 +623,8 @@ export function TimesheetPage() {
       closeModals()
     } catch (error) {
       console.error('Error saving cost entry:', error)
+      // You might want to show a user-friendly error message here
+      alert('Failed to save expense entry. Please try again.')
     }
   }
 
@@ -1140,9 +1097,24 @@ export function TimesheetPage() {
                           {hasData && (
                             <div className="text-center">
                               <span className="text-sm font-semibold text-primary">
-                                {dayEntry?.time_in && dayEntry?.time_out && 
-                                  `${Math.abs(new Date(`1970-01-01T${dayEntry.time_out}:00`).getTime() - 
-                                              new Date(`1970-01-01T${dayEntry.time_in}:00`).getTime()) / (1000 * 60 * 60)}h`
+                                {dayEntry?.time_in && dayEntry?.time_out && (() => {
+                                  try {
+                                    const timeIn = dayEntry.time_in.includes(':') ? dayEntry.time_in : '00:00'
+                                    const timeOut = dayEntry.time_out.includes(':') ? dayEntry.time_out : '00:00'
+                                    const startTime = new Date(`1970-01-01T${timeIn}:00`)
+                                    const endTime = new Date(`1970-01-01T${timeOut}:00`)
+                                    
+                                    if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
+                                      return '0h'
+                                    }
+                                    
+                                    const hours = Math.abs(endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60)
+                                    return `${hours.toFixed(1)}h`
+                                  } catch (error) {
+                                    console.error('Error calculating hours:', error)
+                                    return '0h'
+                                  }
+                                })()
                                 }
                               </span>
                               <p className="text-xs text-muted-foreground">hours</p>
@@ -1312,8 +1284,8 @@ export function TimesheetPage() {
                                         <span className={clsx(
                                           'px-2 py-1 text-xs rounded-full font-medium capitalize',
                                           {
-                                            'bg-blue-100 text-blue-800': costEntry.type === 'travel',
-                                            'bg-purple-100 text-purple-800': costEntry.type === 'accommodation',
+                                            'bg-blue-100 text-blue-800': costEntry.type === 'car' || costEntry.type === 'taxi',
+                                            'bg-purple-100 text-purple-800': costEntry.type === 'hotel',
                                             'bg-green-100 text-green-800': costEntry.type === 'meal',
                                             'bg-gray-100 text-gray-800': costEntry.type === 'other',
                                           }
