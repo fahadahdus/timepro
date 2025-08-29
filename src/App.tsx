@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { NotificationProvider } from './contexts/NotificationContext'
+import { CurrencyProvider } from './contexts/CurrencyContext'
 import { Layout } from './components/Layout'
 import { LoginPage } from './pages/LoginPage'
 import { TimesheetPage } from './pages/TimesheetPage'
@@ -11,6 +12,9 @@ import { ProjectsPage } from './pages/ProjectsPage'
 import { ApprovalsPage } from './pages/ApprovalsPage'
 import { UsersPage } from './pages/UsersPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { VatSettingsPage } from './pages/VatSettingsPage'
+import { CountryRatesPage } from './pages/CountryRatesPage'
+import { CurrencySettingsPage } from './pages/CurrencySettingsPage'
 
 const queryClient = new QueryClient()
 
@@ -95,6 +99,24 @@ function AppContent() {
         </ProtectedRoute>
       } />
       
+      <Route path="/admin/vat-settings" element={
+        <ProtectedRoute requireAdmin={true}>
+          <VatSettingsPage />
+        </ProtectedRoute>
+      } />
+      
+      <Route path="/admin/country-rates" element={
+        <ProtectedRoute requireAdmin={true}>
+          <CountryRatesPage />
+        </ProtectedRoute>
+      } />
+      
+      <Route path="/admin/currency-settings" element={
+        <ProtectedRoute requireAdmin={true}>
+          <CurrencySettingsPage />
+        </ProtectedRoute>
+      } />
+      
       {/* Redirect to role-specific home page */}
       <Route path="/" element={
         user ? (
@@ -116,11 +138,13 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <NotificationProvider>
-          <Router>
-            <AppContent />
-          </Router>
-        </NotificationProvider>
+        <CurrencyProvider>
+          <NotificationProvider>
+            <Router>
+              <AppContent />
+            </Router>
+          </NotificationProvider>
+        </CurrencyProvider>
       </AuthProvider>
     </QueryClientProvider>
   )

@@ -57,9 +57,44 @@ export function TimesheetHistoryPage() {
           if (dayEntries) {
             dayEntries.forEach(day => {
               if (day.time_in && day.time_out) {
-                const timeIn = new Date(`2000-01-01T${day.time_in}`)
-                const timeOut = new Date(`2000-01-01T${day.time_out}`)
-                const hours = (timeOut.getTime() - timeIn.getTime()) / (1000 * 60 * 60)
+                // Improved hours calculation logic
+                const calculateHours = (timeIn, timeOut) => {
+                  try {
+                    // Normalize time format - ensure HH:MM format
+                    const normalizeTime = (time) => {
+                      if (typeof time !== 'string') return '00:00'
+                      const cleaned = time.trim()
+                      if (cleaned.match(/^\d{1,2}:\d{2}$/)) return cleaned
+                      if (cleaned.match(/^\d{1,2}:\d{2}:\d{2}$/)) return cleaned.slice(0, 5)
+                      return '00:00'
+                    }
+                    
+                    const normalizedTimeIn = normalizeTime(timeIn)
+                    const normalizedTimeOut = normalizeTime(timeOut)
+                    
+                    // Create date objects for calculation
+                    const startTime = new Date(`1970-01-01T${normalizedTimeIn}:00`)
+                    const endTime = new Date(`1970-01-01T${normalizedTimeOut}:00`)
+                    
+                    if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
+                      return 0
+                    }
+                    
+                    let timeDiff = endTime.getTime() - startTime.getTime()
+                    
+                    // Handle cases where end time is next day (e.g., night shift)
+                    if (timeDiff < 0) {
+                      timeDiff += 24 * 60 * 60 * 1000 // Add 24 hours
+                    }
+                    
+                    return timeDiff / (1000 * 60 * 60)
+                  } catch (error) {
+                    console.error('Error calculating hours:', error)
+                    return 0
+                  }
+                }
+                
+                const hours = calculateHours(day.time_in, day.time_out)
                 totalHours += hours
                 totalDays += 1
               }
@@ -359,22 +394,46 @@ export function TimesheetHistoryPage() {
                   const date = parseISO(day.date)
                   const hours = (() => {
                     if (!day.time_in || !day.time_out) return '0'
-                    try {
-                      const timeIn = day.time_in.includes(':') ? day.time_in : '00:00'
-                      const timeOut = day.time_out.includes(':') ? day.time_out : '00:00'
-                      const startTime = new Date(`2000-01-01T${timeIn}:00`)
-                      const endTime = new Date(`2000-01-01T${timeOut}:00`)
-                      
-                      if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
-                        return '0'
+                    
+                    // Improved hours calculation logic
+                    const calculateHours = (timeIn, timeOut) => {
+                      try {
+                        // Normalize time format - ensure HH:MM format
+                        const normalizeTime = (time) => {
+                          if (typeof time !== 'string') return '00:00'
+                          const cleaned = time.trim()
+                          if (cleaned.match(/^\d{1,2}:\d{2}$/)) return cleaned
+                          if (cleaned.match(/^\d{1,2}:\d{2}:\d{2}$/)) return cleaned.slice(0, 5)
+                          return '00:00'
+                        }
+                        
+                        const normalizedTimeIn = normalizeTime(timeIn)
+                        const normalizedTimeOut = normalizeTime(timeOut)
+                        
+                        // Create date objects for calculation
+                        const startTime = new Date(`1970-01-01T${normalizedTimeIn}:00`)
+                        const endTime = new Date(`1970-01-01T${normalizedTimeOut}:00`)
+                        
+                        if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
+                          return 0
+                        }
+                        
+                        let timeDiff = endTime.getTime() - startTime.getTime()
+                        
+                        // Handle cases where end time is next day (e.g., night shift)
+                        if (timeDiff < 0) {
+                          timeDiff += 24 * 60 * 60 * 1000 // Add 24 hours
+                        }
+                        
+                        return timeDiff / (1000 * 60 * 60)
+                      } catch (error) {
+                        console.error('Error calculating hours:', error)
+                        return 0
                       }
-                      
-                      const hoursDiff = (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60)
-                      return Math.abs(hoursDiff).toFixed(1)
-                    } catch (error) {
-                      console.error('Error calculating hours:', error)
-                      return '0'
                     }
+                    
+                    const result = calculateHours(day.time_in, day.time_out)
+                    return result > 0 ? result.toFixed(1) : '0'
                   })()
                   
                   return (

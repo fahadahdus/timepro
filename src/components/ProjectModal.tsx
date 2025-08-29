@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
+import { TimeAllocationInput } from './ui/TimeAllocationInput'
 import { X } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Project, ProjectEntry } from '../lib/supabase'
@@ -16,6 +17,9 @@ interface ProjectModalProps {
     man_days: number
     description: string
     travel_chargeable: boolean
+    office?: string
+    city?: string
+    country?: string
   }) => void
   projects: Project[]
   date: string
@@ -37,7 +41,10 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
     location: 'remote' as 'remote' | 'onsite',
     man_days: 1,
     description: '',
-    travel_chargeable: false
+    travel_chargeable: false,
+    office: '',
+    city: '',
+    country: ''
   })
   
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -49,7 +56,10 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
         location: editingProject.location,
         man_days: editingProject.man_days,
         description: editingProject.description || '',
-        travel_chargeable: editingProject.travel_chargeable
+        travel_chargeable: editingProject.travel_chargeable,
+        office: editingProject.office || '',
+        city: editingProject.city || '',
+        country: editingProject.country || ''
       })
     } else {
       setFormData({
@@ -57,7 +67,10 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
         location: 'remote',
         man_days: 1,
         description: '',
-        travel_chargeable: false
+        travel_chargeable: false,
+        office: '',
+        city: '',
+        country: ''
       })
     }
     setErrors({})
@@ -245,15 +258,13 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
               ]}
             />
             
-            <Input
-              type="number"
-              label="Man-days"
-              value={formData.man_days.toString()}
-              onChange={(e) => handleInputChange('man_days', parseFloat(e.target.value) || 0)}
+            <TimeAllocationInput
+              label="Time Allocation"
+              value={formData.man_days}
+              onChange={(value) => handleInputChange('man_days', value)}
               error={errors.man_days}
               variant="floating"
-              min="0"
-              step="0.25"
+              helperText="Select from common fractions or enter a custom value"
             />
             
             <div className="md:col-span-2">
@@ -285,6 +296,50 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
                 </p>
               )}
             </div>
+            
+            {/* Travel Details Section - Collapsible */}
+            {formData.travel_chargeable && (
+              <div className="md:col-span-2">
+                <div className="bg-muted/30 rounded-lg p-4 space-y-4">
+                  <h4 className="text-sm font-medium text-foreground mb-3 flex items-center">
+                    <svg className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Travel Details
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Input
+                      type="text"
+                      label="Office"
+                      value={formData.office}
+                      onChange={(e) => handleInputChange('office', e.target.value)}
+                      variant="floating"
+                      placeholder="e.g., Main Office, Client Site"
+                    />
+                    <Input
+                      type="text"
+                      label="City"
+                      value={formData.city}
+                      onChange={(e) => handleInputChange('city', e.target.value)}
+                      variant="floating"
+                      placeholder="e.g., New York, London"
+                    />
+                    <Input
+                      type="text"
+                      label="Country"
+                      value={formData.country}
+                      onChange={(e) => handleInputChange('country', e.target.value)}
+                      variant="floating"
+                      placeholder="e.g., USA, UK, Germany"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Specify travel destination details for this project work
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         

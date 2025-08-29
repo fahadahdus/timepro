@@ -4,7 +4,6 @@ import { Input } from '../components/ui/Input'
 import { Select } from '../components/ui/Select'
 import { ProjectModal } from '../components/ProjectModal'
 import { ExpenseModal } from '../components/ExpenseModal'
-import { TravelFields } from '../components/TravelFields'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase, Week, DayEntry, ProjectEntry, CostEntry, ExpenseEntry, Project } from '../lib/supabase'
 import { format, startOfWeek, addDays, parseISO, isValid } from 'date-fns'
@@ -20,6 +19,15 @@ interface Country {
   currency_code: string
   is_active: boolean
 }
+
+const OFFICE_LOCATIONS = [
+  { value: 'main_office', label: 'Main Office' },
+  { value: 'branch_office', label: 'Branch Office' },
+  { value: 'client_site', label: 'Client Site' },
+  { value: 'home_office', label: 'Home Office' },
+  { value: 'coworking_space', label: 'Coworking Space' },
+  { value: 'other', label: 'Other' }
+]
 
 interface TimesheetFormData {
   week: Week | null
@@ -45,8 +53,6 @@ export function TimesheetPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [countries, setCountries] = useState<Country[]>([])
   const [citySuggestions, setCitySuggestions] = useState<string[]>([])
-  const [allowanceRates, setAllowanceRates] = useState<{[key: string]: {full_rate: number, partial_rate: number}}>({})
-  const [defaultCurrency, setDefaultCurrency] = useState('EUR')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({})
@@ -79,8 +85,6 @@ export function TimesheetPage() {
     loadProjects()
     loadCountries()
     loadCitySuggestions()
-    loadAllowanceRates()
-    loadSystemSettings()
   }, [])
 
   // Load smart defaults from localStorage on mount
@@ -180,80 +184,6 @@ export function TimesheetPage() {
       const uniqueCities = [...new Set(cityData?.map(item => item.city).filter(Boolean))] as string[]
       setCitySuggestions(uniqueCities.slice(0, 10)) // Limit to 10 suggestions
     }
-  }
-
-  const loadAllowanceRates = async () => {
-    const { data: ratesData, error } = await supabase
-      .from('allowance_rates')
-      .select('country, full_rate, partial_rate')
-      .is('effective_to', null) // Only get active rates
-      .order('country')
-
-    if (error) {
-      console.error('Error loading allowance rates:', error)
-    } else if (ratesData) {
-      const ratesMap: {[key: string]: {full_rate: number, partial_rate: number}} = {}
-      ratesData.forEach(rate => {
-        ratesMap[rate.country] = {
-          full_rate: parseFloat(rate.full_rate),
-          partial_rate: parseFloat(rate.partial_rate)
-        }
-      })
-      setAllowanceRates(ratesMap)
-    }
-  }
-
-  const loadSystemSettings = async () => {
-    const { data: settingsData, error } = await supabase
-      .from('system_settings')
-      .select('key, value')
-      .eq('key', 'default_currency')
-      .single()
-
-    if (error) {
-      console.error('Error loading system settings:', error)
-    } else if (settingsData) {
-      setDefaultCurrency(settingsData.value)
-    }
-  }
-
-  const calculateDailyAllowance = (dayEntry: DayEntry): number => {
-    // Only calculate allowance for travel days
-    if (dayEntry.status !== 'travel' || !dayEntry.country) {
-      return 0
-    }
-
-    const rates = allowanceRates[dayEntry.country]
-    if (!rates) {
-      return 0
-    }
-
-    // Determine if it's a full day or partial day
-    // For now, we'll use full_rate if they have both time_in and time_out
-    // and the day spans more than 6 hours, otherwise partial_rate
-    let isFullDay = false
-    
-    if (dayEntry.time_in && dayEntry.time_out) {
-      const timeIn = new Date(`2000-01-01 ${dayEntry.time_in}`)
-      const timeOut = new Date(`2000-01-01 ${dayEntry.time_out}`)
-      const hoursWorked = (timeOut.getTime() - timeIn.getTime()) / (1000 * 60 * 60)
-      isFullDay = hoursWorked >= 6
-    } else {
-      // If no times are set but it's a travel day, assume full day
-      isFullDay = true
-    }
-
-    return isFullDay ? rates.full_rate : rates.partial_rate
-  }
-
-  const getCurrencySymbol = (currencyCode: string): string => {
-    const symbols: {[key: string]: string} = {
-      'EUR': '€',
-      'USD': '$',
-      'GBP': '£',
-      'CHF': 'CHF'
-    }
-    return symbols[currencyCode] || currencyCode
   }
 
   const loadWeekData = async () => {
@@ -443,15 +373,14 @@ export function TimesheetPage() {
         if (!hasData) continue
         
         if (dayEntry.id) {
-          // Update existing - calculate allowance amount
-          const calculatedAllowance = calculateDailyAllowance(dayEntry)
+          // Update existing
           const { error } = await supabase
             .from('day_entries')
             .update({
               time_in: dayEntry.time_in,
               time_out: dayEntry.time_out,
               status: dayEntry.status,
-              allowance_amount: calculatedAllowance,
+              allowance_amount: dayEntry.allowance_amount,
               office: dayEntry.office,
               city: dayEntry.city,
               country: dayEntry.country
@@ -459,18 +388,8 @@ export function TimesheetPage() {
             .eq('id', dayEntry.id)
           
           if (error) throw error
-          
-          // Update local state with calculated allowance
-          setData(prev => ({
-            ...prev,
-            dayEntries: {
-              ...prev.dayEntries,
-              [date]: { ...dayEntry, allowance_amount: calculatedAllowance }
-            }
-          }))
         } else {
-          // Create new - calculate allowance amount
-          const calculatedAllowance = calculateDailyAllowance(dayEntry)
+          // Create new
           const { data: newDayEntry, error } = await supabase
             .from('day_entries')
             .insert({
@@ -479,7 +398,7 @@ export function TimesheetPage() {
               time_in: dayEntry.time_in,
               time_out: dayEntry.time_out,
               status: dayEntry.status || 'active',
-              allowance_amount: calculatedAllowance,
+              allowance_amount: dayEntry.allowance_amount || 0,
               office: dayEntry.office,
               city: dayEntry.city,
               country: dayEntry.country
@@ -1388,17 +1307,59 @@ export function TimesheetPage() {
                         
                         {/* Conditional Travel Fields */}
                         {dayEntry?.status === 'travel' && (
-                          <TravelFields
-                            dateStr={dateStr}
-                            office={dayEntry?.office}
-                            city={dayEntry?.city}
-                            country={dayEntry?.country}
-                            countries={countries}
-                            citySuggestions={citySuggestions}
-                            isMobile={isMobile}
-                            isReadOnly={isReadOnly}
-                            onChange={(field, value) => handleDayEntryChange(dateStr, field, value)}
-                          />
+                          <div className={clsx(
+                            "bg-muted/20 rounded-lg p-3 space-y-3 mt-3",
+                            "border border-muted"
+                          )}>
+                            <h4 className="text-sm font-medium text-foreground flex items-center">
+                              <svg className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                              </svg>
+                              Travel Location Details
+                            </h4>
+                            <div className={clsx(
+                              "grid gap-3",
+                              {
+                                "grid-cols-1": isMobile,
+                                "grid-cols-3": !isMobile
+                              }
+                            )}>
+                              <Input
+                                type="text"
+                                label={isMobile ? "Office" : undefined}
+                                placeholder="Select office location"
+                                value={dayEntry?.office || ''}
+                                onChange={(e) => handleDayEntryChange(dateStr, 'office', e.target.value)}
+                                disabled={isReadOnly}
+                                onClick={(e) => e.stopPropagation()}
+                                variant={isMobile ? "floating" : "default"}
+                              />
+                              <Input
+                                type="text"
+                                label={isMobile ? "City" : undefined}
+                                placeholder="City"
+                                value={dayEntry?.city || ''}
+                                onChange={(e) => handleDayEntryChange(dateStr, 'city', e.target.value)}
+                                disabled={isReadOnly}
+                                onClick={(e) => e.stopPropagation()}
+                                variant={isMobile ? "floating" : "default"}
+                              />
+                              <Input
+                                type="text"
+                                label={isMobile ? "Country" : undefined}
+                                placeholder="Country"
+                                value={dayEntry?.country || ''}
+                                onChange={(e) => handleDayEntryChange(dateStr, 'country', e.target.value)}
+                                disabled={isReadOnly}
+                                onClick={(e) => e.stopPropagation()}
+                                variant={isMobile ? "floating" : "default"}
+                              />
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Specify travel destination for allowance calculations
+                            </p>
+                          </div>
                         )}
                         
                         <div className={clsx(
@@ -1767,11 +1728,11 @@ export function TimesheetPage() {
                             <span className={clsx(
                               'font-bold',
                               {
-                                'text-success': dayEntry && calculateDailyAllowance(dayEntry) > 0,
-                                'text-muted-foreground': !dayEntry || calculateDailyAllowance(dayEntry) === 0,
+                                'text-success': dayEntry?.allowance_amount && dayEntry.allowance_amount > 0,
+                                'text-muted-foreground': !dayEntry?.allowance_amount || dayEntry.allowance_amount === 0,
                               }
                             )}>
-                              {dayEntry ? `${getCurrencySymbol(defaultCurrency)}${calculateDailyAllowance(dayEntry).toFixed(2)}` : `${getCurrencySymbol(defaultCurrency)}0.00`}
+                              {dayEntry?.allowance_amount ? `$${dayEntry.allowance_amount.toFixed(2)}` : '$0.00'}
                             </span>
                           </div>
                         </div>

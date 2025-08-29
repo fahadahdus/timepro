@@ -71,9 +71,9 @@ export interface DayEntry {
   date: string
   time_in: string | null
   time_out: string | null
-  status: 'active' | 'day_off' | 'vacation' | 'travel'
+  status: 'active' | 'day_off' | 'vacation' | 'travel' | 'weekend_bank_holiday'
   allowance_amount: number
-  work_from: string | null
+  office: string | null
   city: string | null
   country: string | null
   created_at: string
@@ -88,6 +88,9 @@ export interface ProjectEntry {
   man_days: number
   description: string | null
   travel_chargeable: boolean
+  office: string | null
+  city: string | null
+  country: string | null
   invoiced: boolean
   created_at: string
   updated_at: string
@@ -116,6 +119,24 @@ export interface AllowanceRate {
   effective_from: string
   effective_to: string | null
   created_at: string
+}
+
+export interface ExpenseEntry {
+  id: string
+  user_id: string
+  project_id: string
+  date: string
+  expense_type: 'train' | 'taxi' | 'flight' | 'rental_car' | 'fuel' | 'parking' | 'onpv' | 'hospitality' | 'hotel' | 'car' | 'others'
+  description: string | null
+  gross_amount: number
+  vat_percentage: number
+  vat_amount: number
+  net_amount: number
+  distance_km: number | null
+  rate_per_km: number | null
+  receipt_uploaded: boolean
+  created_at: string
+  updated_at: string
 }
 
 export interface AuditLog {

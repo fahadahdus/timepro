@@ -138,6 +138,9 @@ Deno.serve(async (req) => {
         man_days: projectData.man_days,
         description: projectData.description,
         travel_chargeable: projectData.travel_chargeable,
+        office: projectData.office || null,
+        city: projectData.city || null,
+        country: projectData.country || null,
         invoiced: false
       })
       .select()
