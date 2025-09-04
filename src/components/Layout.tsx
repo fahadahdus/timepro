@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LogOut, Clock, Users, Settings, BarChart3, CheckSquare, User, Menu, X, Calculator, MapPin, DollarSign } from 'lucide-react'
+import { LogOut, Clock, Users, BarChart3, CheckSquare, User, Menu, X, Settings, Calculator, MapPin, DollarSign, Receipt } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useIsMobile } from '../hooks/use-mobile'
 
@@ -27,6 +27,7 @@ export function Layout({ children }: LayoutProps) {
     { name: 'VAT Configuration', href: '/admin/vat-settings', icon: Calculator, show: isAdmin, description: 'Configure VAT rates for expense types' },
     { name: 'Country Rates', href: '/admin/country-rates', icon: MapPin, show: isAdmin, description: 'Manage daily allowance rates by country' },
     { name: 'Currency Settings', href: '/admin/currency-settings', icon: DollarSign, show: isAdmin, description: 'Configure default application currency' },
+    { name: 'Travel Reports', href: '/admin/travel-reports', icon: Receipt, show: isAdmin, description: 'Generate and send travel expense reports' },
     { name: 'Settings', href: '/admin/settings', icon: Settings, show: isAdmin, description: 'Configure rates and system settings' },
   ].filter(item => item.show)
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Button } from '../components/ui/Button'
-import { Input } from '../components/ui/Input'
-import { Select } from '../components/ui/Select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { useNotifications } from '../contexts/NotificationContext'
 import { supabase } from '../lib/supabase'
 import { Settings as SettingsIcon, DollarSign, Globe, Percent, Save, Plus, Edit2, Trash2 } from 'lucide-react'
@@ -42,7 +42,7 @@ export function SettingsPage() {
   
   // Default rates form state
   const [rateForm, setRateForm] = useState({
-    project_type: 'TNM',
+    project_type: 'time_and_material',
     hourly_rate: ''
   })
   
@@ -327,9 +327,9 @@ export function SettingsPage() {
                       type="submit"
                       variant="primary"
                       loading={saving}
-                      icon={<Plus className="h-4 w-4" />}
                       className="w-full"
                     >
+                      <Plus className="h-4 w-4" />
                       Add Rate
                     </Button>
                   </form>
@@ -366,9 +366,10 @@ export function SettingsPage() {
                                 handleDeleteAllowanceRate(rate.id)
                               }
                             }}
-                            icon={<Trash2 className="h-4 w-4" />}
                             className="text-destructive hover:text-destructive"
-                          />
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
                     ))}
@@ -407,18 +408,14 @@ export function SettingsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          icon={<Edit2 className="h-4 w-4" />}
                           onClick={() => {
-                            // Set the rate form with this rate's data
                             setRateForm({
                               project_type: rate.project_type,
                               hourly_rate: rate.hourly_rate.toString()
                             })
-                            // Show a modal or update UI for editing
-                            // In a real implementation, this would open an edit modal
-                            // For now, we'll use the existing form for adding rates
                           }}
                         >
+                          <Edit2 className="h-4 w-4" />
                           Edit
                         </Button>
                       </div>
@@ -436,8 +433,8 @@ export function SettingsPage() {
                       value={rateForm.project_type}
                       onChange={(e) => setRateForm({ ...rateForm, project_type: e.target.value })}
                       options={[
-                        { value: 'TNM', label: 'Time & Materials' },
-                        { value: 'Fixed', label: 'Fixed Price' }
+                        { value: 'time_and_material', label: 'Time & Materials' },
+                        { value: 'fixed_price', label: 'Fixed Price' }
                       ]}
                     />
                     
@@ -452,7 +449,6 @@ export function SettingsPage() {
                     
                     <Button
                       variant="primary"
-                      icon={<Plus className="h-4 w-4" />}
                       className="w-full"
                       onClick={async () => {
                         try {
@@ -467,7 +463,7 @@ export function SettingsPage() {
                             .insert({
                               project_type: rateForm.project_type,
                               hourly_rate: parseFloat(rateForm.hourly_rate),
-                              description: `Default rate for ${rateForm.project_type === 'TNM' ? 'Time & Materials' : 'Fixed Price'} projects`
+                              description: `Default rate for ${rateForm.project_type === 'time_and_material' ? 'Time & Materials' : 'Fixed Price'} projects`
                             })
                             .select()
                           
@@ -475,7 +471,7 @@ export function SettingsPage() {
                           
                           success('Rate added successfully')
                           setRateForm({
-                            project_type: 'TNM',
+                            project_type: 'time_and_material',
                             hourly_rate: ''
                           })
                           loadDefaultRates()
@@ -488,6 +484,7 @@ export function SettingsPage() {
                       }}
                       loading={saving}
                     >
+                      <Plus className="h-4 w-4" />
                       Add Rate
                     </Button>
                   </div>
@@ -574,9 +571,9 @@ export function SettingsPage() {
                     variant="primary"
                     onClick={handleGeneralSettingsSave}
                     loading={saving}
-                    icon={<Save className="h-4 w-4" />}
                     className="w-full"
                   >
+                    <Save className="h-4 w-4" />
                     Save Settings
                   </Button>
                 </div>

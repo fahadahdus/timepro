@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Button } from './ui/Button'
-import { Input } from './ui/Input'
-import { Select } from './ui/Select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { X, Calculator, Receipt } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Project, ExpenseEntry } from '../lib/supabase'
@@ -25,6 +25,7 @@ interface ExpenseModalProps {
   projects: Project[]
   date: string
   editingExpense?: ExpenseEntry
+  selectedProjectId?: string
 }
 
 interface VatConfig {
@@ -56,7 +57,7 @@ const CAR_RATES = [
   { value: 0.3, label: '0.30€ per km' }
 ]
 
-export function ExpenseModal({ isOpen, onClose, onSave, projects, date, editingExpense }: ExpenseModalProps) {
+export function ExpenseModal({ isOpen, onClose, onSave, projects, date, editingExpense, selectedProjectId }: ExpenseModalProps) {
   const { formatCurrency } = useCurrency()
   const [vatConfig, setVatConfig] = useState<VatConfig>({})
   const [loadingVatConfig, setLoadingVatConfig] = useState(true)
@@ -137,7 +138,7 @@ export function ExpenseModal({ isOpen, onClose, onSave, projects, date, editingE
       })
     } else {
       setFormData({
-        project_id: '',
+        project_id: selectedProjectId || '',
         expense_type: '',
         date: date,
         description: '',
@@ -148,7 +149,7 @@ export function ExpenseModal({ isOpen, onClose, onSave, projects, date, editingE
       })
     }
     setErrors({})
-  }, [editingExpense, isOpen, date])
+  }, [editingExpense, isOpen, date, selectedProjectId])
 
   // Calculate amounts when relevant fields change
   useEffect(() => {
@@ -289,7 +290,7 @@ export function ExpenseModal({ isOpen, onClose, onSave, projects, date, editingE
               {editingExpense ? 'Edit Expense Entry' : 'Add Expense Entry'}
             </h3>
             <p className="text-sm text-muted-foreground mt-1">
-              {format(new Date(formData.date), 'EEEE, MMMM d, yyyy')}
+              {formData.date ? format(new Date(formData.date), 'EEEE, MMMM d, yyyy') : 'Select a date'}
             </p>
           </div>
           <Button
@@ -306,20 +307,37 @@ export function ExpenseModal({ isOpen, onClose, onSave, projects, date, editingE
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Project Selection */}
             <div className="md:col-span-2">
-              <Select
-                label="Project *"
-                value={formData.project_id}
-                onChange={(e) => handleInputChange('project_id', e.target.value)}
-                error={errors.project_id}
-                variant="floating"
-                options={[
-                  { value: '', label: 'Select a project...' },
-                  ...projects.map(project => ({
-                    value: project.id,
-                    label: `${project.name} (${project.code})`
-                  }))
-                ]}
-              />
+              {selectedProjectId ? (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Project</label>
+                  <div className="bg-muted/30 border border-border rounded-lg p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-foreground">{selectedProject?.name}</p>
+                        <p className="text-sm text-muted-foreground">Code: {selectedProject?.code}</p>
+                      </div>
+                      <div className="bg-primary/10 text-primary text-xs px-2 py-1 rounded">
+                        Selected
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <Select
+                  label="Project *"
+                  value={formData.project_id}
+                  onChange={(e) => handleInputChange('project_id', e.target.value)}
+                  error={errors.project_id}
+                  variant="floating"
+                  options={[
+                    { value: '', label: 'Select a project...' },
+                    ...projects.map(project => ({
+                      value: project.id,
+                      label: `${project.name} (${project.code})`
+                    }))
+                  ]}
+                />
+              )}
             </div>
             
             {/* Expense Type */}

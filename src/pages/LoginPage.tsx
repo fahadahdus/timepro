@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
-import { Button } from '../components/ui/Button'
-import { Input } from '../components/ui/Input'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { useAuth } from '../contexts/AuthContext'
 import { Clock, Mail, Lock, AlertCircle } from 'lucide-react'
 
@@ -119,7 +119,7 @@ export function LoginPage() {
               <div className="text-center">
                 <p className="text-xs text-info font-medium mb-1">Test Credentials</p>
                 <p className="text-xs font-semibold mb-1">Admin User:</p>
-                <p className="text-xs text-muted-foreground">Email: admin@timesheet.com</p>
+                <p className="text-xs text-muted-foreground">Email: ralf@schwarzenberg.tech</p>
                 <p className="text-xs text-muted-foreground mb-2">Password: Admin123!</p>
                 <p className="text-xs font-semibold mb-1">Consultant User:</p>
                 <p className="text-xs text-muted-foreground">Email: consultant@timesheet.com</p>

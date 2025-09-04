@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Button } from '../components/ui/Button'
-import { Input } from '../components/ui/Input'
-import { Select } from '../components/ui/Select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { supabase, Week } from '../lib/supabase'
 import { CheckCircle, XCircle, Clock, Search, MessageCircle } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
@@ -251,18 +251,18 @@ export function ApprovalsPage() {
                             variant="ghost"
                             size="sm"
                             onClick={() => handleApprove(week)}
-                            icon={<CheckCircle className="h-4 w-4" />}
                             className="text-success hover:text-success hover:bg-success/10"
                           >
+                            <CheckCircle className="h-4 w-4" />
                             Approve
                           </Button>
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => openRejectModal(week)}
-                            icon={<XCircle className="h-4 w-4" />}
                             className="text-destructive hover:text-destructive hover:bg-destructive/10"
                           >
+                            <XCircle className="h-4 w-4" />
                             Reject
                           </Button>
                         </div>
@@ -332,8 +332,8 @@ export function ApprovalsPage() {
                   onClick={handleReject}
                   disabled={!rejectionReason.trim()}
                   className="flex-1"
-                  icon={<XCircle className="h-4 w-4" />}
                 >
+                  <XCircle className="h-4 w-4" />
                   Reject
                 </Button>
               </div>

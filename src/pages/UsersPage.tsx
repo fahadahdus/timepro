@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Button } from '../components/ui/Button'
-import { Input } from '../components/ui/Input'
-import { Select } from '../components/ui/Select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { supabase } from '../lib/supabase'
 import { useNotifications } from '../contexts/NotificationContext'
 import { Plus, Edit2, Trash2, Search, User, Mail, DollarSign } from 'lucide-react'
@@ -214,10 +214,10 @@ export function UsersPage() {
         </div>
         <Button
           onClick={() => setShowCreateModal(true)}
-          icon={<Plus className="h-4 w-4" />}
           variant="primary"
           className="shadow-lg"
         >
+          <Plus className="h-4 w-4" />
           New User
         </Button>
       </div>
@@ -324,8 +324,8 @@ export function UsersPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleEdit(user)}
-                          icon={<Edit2 className="h-4 w-4" />}
                         >
+                          <Edit2 className="h-4 w-4" />
                           Edit
                         </Button>
                         <Button

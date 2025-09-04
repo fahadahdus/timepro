@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Button } from './ui/Button'
-import { Input } from './ui/Input'
-import { Select } from './ui/Select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { TimeAllocationInput } from './ui/TimeAllocationInput'
 import { X } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -30,7 +30,6 @@ interface ProjectModalProps {
     projectDefaults: Map<string, {
       location: 'remote' | 'onsite'
       man_days: number
-      travel_chargeable: boolean
     }>
   }
 }
@@ -41,7 +40,6 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
     location: 'remote' as 'remote' | 'onsite',
     man_days: 1,
     description: '',
-    travel_chargeable: false,
     office: '',
     city: '',
     country: ''
@@ -56,7 +54,6 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
         location: editingProject.location,
         man_days: editingProject.man_days,
         description: editingProject.description || '',
-        travel_chargeable: editingProject.travel_chargeable,
         office: editingProject.office || '',
         city: editingProject.city || '',
         country: editingProject.country || ''
@@ -67,7 +64,6 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
         location: 'remote',
         man_days: 1,
         description: '',
-        travel_chargeable: false,
         office: '',
         city: '',
         country: ''
@@ -94,7 +90,6 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
       // Apply smart defaults based on project configuration or learned preferences
       const projectSmartDefaults = learnedDefaults || {
         location: project.billing_type === 'fixed_price' ? 'remote' : (smartDefaults?.lastLocation || 'onsite'),
-        travel_chargeable: project.travel_billable || false,
         man_days: project.billing_type === 'fixed_price' ? 1 : 0.5
       }
       
@@ -102,7 +97,6 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
         ...prev,
         project_id: projectId,
         location: projectSmartDefaults.location as 'remote' | 'onsite',
-        travel_chargeable: projectSmartDefaults.travel_chargeable,
         man_days: projectSmartDefaults.man_days
       }))
       
@@ -132,7 +126,12 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
 
   const handleSubmit = () => {
     if (validateForm()) {
-      onSave(formData)
+      // Add travel_chargeable based on project's travel_billable setting
+      const submitData = {
+        ...formData,
+        travel_chargeable: selectedProject?.travel_billable || false
+      }
+      onSave(submitData)
     }
   }
 
@@ -277,36 +276,16 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
               <label className="floating-label">Description (Optional)</label>
             </div>
             
-            <div className="md:col-span-2">
-              <div className="flex items-center space-x-3">
-                <input
-                  type="checkbox"
-                  id="travel_chargeable"
-                  checked={formData.travel_chargeable}
-                  onChange={(e) => handleInputChange('travel_chargeable', e.target.checked)}
-                  className="h-4 w-4 text-primary focus:ring-primary border-border rounded"
-                />
-                <label htmlFor="travel_chargeable" className="text-sm font-medium text-foreground">
-                  Travel is chargeable for this project
-                </label>
-              </div>
-              {selectedProject?.travel_billable && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  This project allows billable travel expenses
-                </p>
-              )}
-            </div>
-            
-            {/* Travel Details Section - Collapsible */}
-            {formData.travel_chargeable && (
+            {/* Travel Details Section - Show only if project allows travel billing */}
+            {selectedProject?.travel_billable && (
               <div className="md:col-span-2">
                 <div className="bg-muted/30 rounded-lg p-4 space-y-4">
                   <h4 className="text-sm font-medium text-foreground mb-3 flex items-center">
                     <svg className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 616 0z" />
                     </svg>
-                    Travel Details
+                    Travel Details (This project allows billable travel)
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Input
@@ -335,7 +314,7 @@ export function ProjectModal({ isOpen, onClose, onSave, projects, date, editingP
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Specify travel destination details for this project work
+                    Travel expenses will be chargeable for this project based on admin configuration
                   </p>
                 </div>
               </div>

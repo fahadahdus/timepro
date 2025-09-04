@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4'
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -12,29 +13,47 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Create authenticated Supabase client
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false
-        },
-        global: {
-          headers: { Authorization: req.headers.get('Authorization')! }
-        }
-      }
-    )
-
-    // Get the current authenticated user
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser()
-    if (userError || !user) {
+    // Get authorization header
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
       return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
+        JSON.stringify({ error: 'Authorization header missing' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
+
+    // Extract the JWT token from the Bearer header
+    const token = authHeader.replace('Bearer ', '')
+
+    // Create authenticated Supabase client
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+    )
+
+    // Set the auth token
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token)
+    
+    if (userError || !user) {
+      console.error('Authentication error:', userError)
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized - please sign in again', details: userError?.message }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log('Authenticated user:', user.id, user.email)
+
+    // Create a new client instance with the user's session for database operations
+    const authenticatedClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      {
+        global: {
+          headers: { Authorization: authHeader }
+        }
+      }
+    )
 
     // Parse request body
     const { date, projectData } = await req.json()
@@ -52,7 +71,7 @@ Deno.serve(async (req) => {
     weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1) // Get Monday
     const weekStartStr = weekStart.toISOString().split('T')[0]
 
-    let { data: week, error: weekError } = await supabaseClient
+    let { data: week, error: weekError } = await authenticatedClient
       .from('weeks')
       .select('*')
       .eq('user_id', user.id)
@@ -69,7 +88,7 @@ Deno.serve(async (req) => {
 
     // Create week if it doesn't exist
     if (!week) {
-      const { data: newWeek, error: createWeekError } = await supabaseClient
+      const { data: newWeek, error: createWeekError } = await authenticatedClient
         .from('weeks')
         .insert({
           user_id: user.id,
@@ -90,7 +109,7 @@ Deno.serve(async (req) => {
     }
 
     // Ensure we have a day entry
-    let { data: dayEntry, error: dayError } = await supabaseClient
+    let { data: dayEntry, error: dayError } = await authenticatedClient
       .from('day_entries')
       .select('*')
       .eq('week_id', week.id)
@@ -107,7 +126,7 @@ Deno.serve(async (req) => {
 
     // Create day entry if it doesn't exist
     if (!dayEntry) {
-      const { data: newDayEntry, error: createDayError } = await supabaseClient
+      const { data: newDayEntry, error: createDayError } = await authenticatedClient
         .from('day_entries')
         .insert({
           week_id: week.id,
@@ -129,7 +148,7 @@ Deno.serve(async (req) => {
     }
 
     // Create the project entry
-    const { data: projectEntry, error: projectError } = await supabaseClient
+    const { data: projectEntry, error: projectError } = await authenticatedClient
       .from('project_entries')
       .insert({
         day_entry_id: dayEntry.id,
@@ -137,11 +156,7 @@ Deno.serve(async (req) => {
         location: projectData.location,
         man_days: projectData.man_days,
         description: projectData.description,
-        travel_chargeable: projectData.travel_chargeable,
-        office: projectData.office || null,
-        city: projectData.city || null,
-        country: projectData.country || null,
-        invoiced: false
+        travel_chargeable: projectData.travel_chargeable
       })
       .select()
       .single()

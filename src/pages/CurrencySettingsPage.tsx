@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../contexts/CurrencyContext'
 import { useNotifications } from '../contexts/NotificationContext'
-import { Button } from '../components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { DollarSign, Check, AlertCircle, RefreshCw } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -77,9 +77,19 @@ export function CurrencySettingsPage() {
 
     try {
       setUpdating(selectedCurrency.currency_code)
+      
+      // Get current session to ensure we have a valid token
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        throw new Error('No valid session token. Please log in again.')
+      }
+      
       const { data, error } = await supabase.functions.invoke('update-currency-settings', {
         body: {
           currency_code: selectedCurrency.currency_code
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
         }
       })
 
@@ -162,8 +172,8 @@ export function CurrencySettingsPage() {
           <Button
             variant="outline"
             onClick={loadCurrencies}
-            icon={<RefreshCw className="h-4 w-4" />}
           >
+            <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
         </div>

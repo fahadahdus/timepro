@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Button } from '../components/ui/Button'
-import { Input } from '../components/ui/Input'
-import { Select } from '../components/ui/Select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase, Week } from '../lib/supabase'
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns'
@@ -331,8 +331,8 @@ export function TimesheetHistoryPage() {
                         variant="ghost"
                         size="sm"
                         onClick={() => loadWeekDetails(week)}
-                        icon={<Eye className="h-4 w-4" />}
                       >
+                        <Eye className="h-4 w-4" />
                         View Details
                       </Button>
                     </td>
@@ -452,10 +452,13 @@ export function TimesheetHistoryPage() {
                             <span className={clsx(
                               'px-2 py-1 rounded text-xs',
                               {
+                                'bg-blue-100 text-blue-700': day.status === 'office',
                                 'bg-success/10 text-success': day.status === 'active',
                                 'bg-info/10 text-info': day.status === 'travel',
                                 'bg-orange-100 text-orange-700': day.status === 'vacation',
-                                'bg-muted text-muted-foreground': day.status === 'day_off'
+                                'bg-muted text-muted-foreground': day.status === 'day_off',
+                                'bg-purple-100 text-purple-700': day.status === 'weekend',
+                                'bg-amber-100 text-amber-700': day.status === 'bank_holiday'
                               }
                             )}>
                               {day.status.replace('_', ' ').toUpperCase()}

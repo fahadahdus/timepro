@@ -1,7 +1,7 @@
 import React from 'react'
 import { clsx } from 'clsx'
 
-interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string
   error?: string
   helperText?: string
@@ -10,7 +10,7 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   icon?: React.ReactNode
 }
 
-export function Input({
+export const Input = React.forwardRef<HTMLInputElement, InputProps>(({
   className,
   label,
   error,
@@ -20,7 +20,7 @@ export function Input({
   success = false,
   icon,
   ...props
-}: InputProps) {
+}, ref) => {
   const inputId = id || `input-${Math.random().toString(36).substring(7)}`
 
   if (variant === 'floating' && label) {
@@ -33,6 +33,7 @@ export function Input({
             </div>
           )}
           <input
+            ref={ref}
             id={inputId}
             className={clsx(
               'modern-input floating-input peer text-input-value',
@@ -98,6 +99,7 @@ export function Input({
           </div>
         )}
         <input
+          ref={ref}
           id={inputId}
           className={clsx(
             'modern-input text-input-value',
@@ -128,4 +130,5 @@ export function Input({
       )}
     </div>
   )
-}
+})
+Input.displayName = "Input"

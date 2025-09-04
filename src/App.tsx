@@ -6,7 +6,7 @@ import { NotificationProvider } from './contexts/NotificationContext'
 import { CurrencyProvider } from './contexts/CurrencyContext'
 import { Layout } from './components/Layout'
 import { LoginPage } from './pages/LoginPage'
-import { TimesheetPage } from './pages/TimesheetPage'
+import { TimesheetPageEnhanced as TimesheetPage } from './pages/TimesheetPageEnhanced'
 import { TimesheetHistoryPage } from './pages/TimesheetHistoryPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { ApprovalsPage } from './pages/ApprovalsPage'
@@ -15,6 +15,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { VatSettingsPage } from './pages/VatSettingsPage'
 import { CountryRatesPage } from './pages/CountryRatesPage'
 import { CurrencySettingsPage } from './pages/CurrencySettingsPage'
+import { TravelCostsReportPage } from './pages/TravelCostsReportPage'
 
 const queryClient = new QueryClient()
 
@@ -114,6 +115,12 @@ function AppContent() {
       <Route path="/admin/currency-settings" element={
         <ProtectedRoute requireAdmin={true}>
           <CurrencySettingsPage />
+        </ProtectedRoute>
+      } />
+      
+      <Route path="/admin/travel-reports" element={
+        <ProtectedRoute requireAdmin={true}>
+          <TravelCostsReportPage />
         </ProtectedRoute>
       } />
       

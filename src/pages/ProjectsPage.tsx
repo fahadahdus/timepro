@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Button } from '../components/ui/Button'
-import { Input } from '../components/ui/Input'
-import { Select } from '../components/ui/Select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { supabase, Project } from '../lib/supabase'
 import { Plus, Edit2, Trash2, Search, Filter } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -122,21 +122,83 @@ export function ProjectsPage() {
   }
 
   const handleDelete = async (project: Project) => {
-    if (!confirm(`Are you sure you want to delete project "${project.name}"?`)) {
-      return
-    }
-
+    // Check if user has super admin role first
     try {
+      const { data: currentUser } = await supabase.auth.getUser()
+      if (!currentUser.user) {
+        alert('You must be logged in to delete projects')
+        return
+      }
+
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', currentUser.user.id)
+        .single()
+
+      if (userError || userData?.role !== 'super_admin') {
+        alert('Only super administrators can delete projects. This operation is restricted due to potential impact on travel records and billing data.')
+        return
+      }
+
+      // Check for associated travel expense entries
+      const { data: travelExpenses, error: travelError } = await supabase
+        .from('travel_expense_entries')
+        .select('id, allowance_amount, description')
+        .eq('project_id', project.id)
+
+      if (travelError) {
+        console.error('Error checking travel expenses:', travelError)
+      }
+
+      // Check for associated project entries
+      const { data: projectEntries, error: projectError } = await supabase
+        .from('project_entries')
+        .select('id, man_days')
+        .eq('project_id', project.id)
+
+      if (projectError) {
+        console.error('Error checking project entries:', projectError)
+      }
+
+      const hasRelatedData = (travelExpenses && travelExpenses.length > 0) || (projectEntries && projectEntries.length > 0)
+      
+      let confirmMessage = `Are you sure you want to delete project "${project.name}"?`
+      
+      if (hasRelatedData) {
+        confirmMessage += `\n\nWARNING: This project has associated data that will also be deleted:\n`
+        
+        if (travelExpenses && travelExpenses.length > 0) {
+          confirmMessage += `• ${travelExpenses.length} travel expense record(s)\n`
+        }
+        
+        if (projectEntries && projectEntries.length > 0) {
+          confirmMessage += `• ${projectEntries.length} project entry record(s)\n`
+        }
+        
+        confirmMessage += `\nThis action cannot be undone and may affect billing and reporting data.`
+      }
+
+      if (!confirm(confirmMessage)) {
+        return
+      }
+
       const { error } = await supabase
         .from('projects')
         .delete()
         .eq('id', project.id)
       
       if (error) throw error
+      
+      alert('Project and all associated data deleted successfully.')
       loadProjects()
     } catch (error: any) {
       console.error('Error deleting project:', error)
-      alert(error.message || 'Error deleting project')
+      if (error.message.includes('permission denied') || error.message.includes('policy')) {
+        alert('Permission denied. Only super administrators can delete projects.')
+      } else {
+        alert(error.message || 'Error deleting project')
+      }
     }
   }
 
@@ -178,10 +240,10 @@ export function ProjectsPage() {
         </div>
         <Button
           onClick={() => setShowCreateModal(true)}
-          icon={<Plus className="h-4 w-4" />}
           variant="primary"
           className="shadow-lg"
         >
+          <Plus className="h-4 w-4" />
           New Project
         </Button>
       </div>
@@ -279,17 +341,17 @@ export function ProjectsPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleEdit(project)}
-                          icon={<Edit2 className="h-4 w-4" />}
                         >
+                          <Edit2 className="h-4 w-4" />
                           Edit
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => handleDelete(project)}
-                          icon={<Trash2 className="h-4 w-4" />}
                           className="text-destructive hover:text-destructive"
                         >
+                          <Trash2 className="h-4 w-4" />
                           Delete
                         </Button>
                       </div>

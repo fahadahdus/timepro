@@ -1,16 +1,20 @@
 import React, { useState, useEffect } from 'react'
-import { Button } from '../components/ui/Button'
-import { Input } from '../components/ui/Input'
-import { Select } from '../components/ui/Select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { ProjectModal } from '../components/ProjectModal'
 import { ExpenseModal } from '../components/ExpenseModal'
 import { TravelFields } from '../components/TravelFields'
+import { TravelExpenseModal } from '../components/TravelExpenseModal'
 import { useAuth } from '../contexts/AuthContext'
-import { supabase, Week, DayEntry, ProjectEntry, CostEntry, ExpenseEntry, Project } from '../lib/supabase'
+import { supabase, Week, DayEntry, ProjectEntry, CostEntry, ExpenseEntry, TravelExpenseEntry, Project } from '../lib/supabase'
 import { format, startOfWeek, addDays, parseISO, isValid } from 'date-fns'
-import { ChevronLeft, ChevronRight, Save, Copy, Clock, Plus, Trash2, ChevronDown, ChevronUp, BarChart3 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Save, Copy, Clock, Plus, Trash2, ChevronDown, ChevronUp, BarChart3, Receipt } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useIsMobile } from '../hooks/use-mobile'
+import { cleanupOrphanedTravelExpense } from '../utils/cleanupOrphanedTravelExpense'
+// Delete the orphaned travel expense entry
+import '../utils/deleteSpecificTravelExpense'
 
 interface Country {
   id: string
@@ -27,6 +31,7 @@ interface TimesheetFormData {
   projectEntries: Record<string, ProjectEntry[]>
   costEntries: Record<string, CostEntry[]>
   expenseEntries: Record<string, ExpenseEntry[]>
+  travelExpenseEntries: Record<string, TravelExpenseEntry[]>
 }
 
 export function TimesheetPage() {
@@ -40,7 +45,8 @@ export function TimesheetPage() {
     dayEntries: {},
     projectEntries: {},
     costEntries: {},
-    expenseEntries: {}
+    expenseEntries: {},
+    travelExpenseEntries: {}
   })
   const [projects, setProjects] = useState<Project[]>([])
   const [countries, setCountries] = useState<Country[]>([])
@@ -53,14 +59,18 @@ export function TimesheetPage() {
   const [autoSave, setAutoSave] = useState(true)
   const [showProjectModal, setShowProjectModal] = useState(false)
   const [showExpenseModal, setShowExpenseModal] = useState(false)
+  const [showTravelExpenseModal, setShowTravelExpenseModal] = useState(false)
   const [currentModalDate, setCurrentModalDate] = useState<string>('')
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
+  const [editingTravelExpenseId, setEditingTravelExpenseId] = useState<string | null>(null)
   const [smartDefaults, setSmartDefaults] = useState({
     lastLocation: 'remote' as 'remote' | 'onsite',
+    lastOffice: '',
     lastCity: '',
     lastCountry: '',
     recentProjects: [] as string[],
+    recentOffices: [] as string[],
     recentExpenseTypes: [] as ('car' | 'train' | 'flight' | 'taxi' | 'hotel' | 'meal' | 'other')[],
     projectDefaults: new Map<string, {
       location: 'remote' | 'onsite'
@@ -113,6 +123,8 @@ export function TimesheetPage() {
   useEffect(() => {
     if (user) {
       loadWeekData()
+      // Clean up orphaned travel expense on page load
+      cleanupOrphanedTravelExpense()
     }
   }, [currentWeekStart, user])
 
@@ -223,6 +235,18 @@ export function TimesheetPage() {
       return 0
     }
 
+    // First check if we have travel expense entries with calculated allowance
+    const travelExpenses = data.travelExpenseEntries[dayEntry.date] || []
+    if (travelExpenses.length > 0) {
+      const totalAllowance = travelExpenses.reduce((sum, expense) => {
+        return sum + (expense.allowance_amount || 0)
+      }, 0)
+      if (totalAllowance > 0) {
+        return totalAllowance
+      }
+    }
+
+    // Fallback to calculating from allowance rates
     const rates = allowanceRates[dayEntry.country]
     if (!rates) {
       return 0
@@ -289,6 +313,7 @@ export function TimesheetPage() {
       const projectEntriesRecord: Record<string, ProjectEntry[]> = {}
       const costEntriesRecord: Record<string, CostEntry[]> = {}
       const expenseEntriesRecord: Record<string, ExpenseEntry[]> = {}
+      const travelExpenseEntriesRecord: Record<string, TravelExpenseEntry[]> = {}
 
       // Create empty day entries for the whole week
       weekDays.forEach(day => {
@@ -301,17 +326,26 @@ export function TimesheetPage() {
           date: dateStr,
           time_in: null,
           time_out: null,
-          status: isWeekend ? 'weekend_bank_holiday' : 'active', // Default weekends to weekend_bank_holiday
+          status: isWeekend ? 'weekend' : 'office', // Default weekends to weekend, weekdays to office
           allowance_amount: 0,
           office: null,
           city: null,
           country: null,
+          project_id: null,
+          travel_start_time: null,
+          travel_end_time: null,
+          travel_from_location: null,
+          travel_to_location: null,
+          travel_custom_from_location: null,
+          travel_custom_to_location: null,
+          travel_description: null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         }
         projectEntriesRecord[dateStr] = []
         costEntriesRecord[dateStr] = []
         expenseEntriesRecord[dateStr] = []
+        travelExpenseEntriesRecord[dateStr] = []
       })
 
       // If week exists, fetch actual day entries
@@ -342,6 +376,14 @@ export function TimesheetPage() {
               .eq('day_entry_id', dayEntry.id)
             
             costEntriesRecord[dayEntry.date] = costEntries || []
+            
+            // Load travel expense entries for this day
+            const { data: travelExpenseEntries } = await supabase
+              .from('travel_expense_entries')
+              .select('*')
+              .eq('day_entry_id', dayEntry.id)
+            
+            travelExpenseEntriesRecord[dayEntry.date] = travelExpenseEntries || []
           }
         }
         
@@ -368,7 +410,8 @@ export function TimesheetPage() {
         dayEntries: dayEntriesRecord,
         projectEntries: projectEntriesRecord,
         costEntries: costEntriesRecord,
-        expenseEntries: expenseEntriesRecord
+        expenseEntries: expenseEntriesRecord,
+        travelExpenseEntries: travelExpenseEntriesRecord
       })
       
       // Auto-expand days with data (only expand the first one found for accordion behavior)
@@ -383,7 +426,11 @@ export function TimesheetPage() {
       // Find the first day with data and expand only that one
       Object.keys(dayEntriesRecord).forEach(date => {
         const entry = dayEntriesRecord[date]
-        if (!firstDayWithDataFound && (entry?.time_in || entry?.time_out || entry?.status !== 'active')) {
+        const dayOfWeek = new Date(date).getDay()
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
+        const defaultStatus = isWeekend ? 'weekend' : 'office'
+        
+        if (!firstDayWithDataFound && (entry?.time_in || entry?.time_out || entry?.status !== defaultStatus)) {
           newExpandedDays[date] = true
           firstDayWithDataFound = true
         }
@@ -403,6 +450,13 @@ export function TimesheetPage() {
     
     // Validate that we have valid data before saving
     const validationErrors: string[] = []
+    
+    // Check for required project selection for travel days
+    Object.entries(data.dayEntries).forEach(([date, dayEntry]) => {
+      if (dayEntry.status === 'travel' && !dayEntry.project_id) {
+        validationErrors.push(`Project selection is required for travel day on ${date}`)
+      }
+    })
     
     if (validationErrors.length > 0) {
       alert(`Please complete the following required information:\n\n${validationErrors.join('\n')}`)
@@ -438,7 +492,10 @@ export function TimesheetPage() {
       // Save day entries with actual data
       for (const [date, dayEntry] of Object.entries(data.dayEntries)) {
         // Only save entries that have actual data
-        const hasData = dayEntry.time_in || dayEntry.time_out || dayEntry.status !== 'active'
+        const dayOfWeek = new Date(date).getDay()
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
+        const defaultStatus = isWeekend ? 'weekend' : 'office'
+        const hasData = dayEntry.time_in || dayEntry.time_out || dayEntry.status !== defaultStatus
         
         if (!hasData) continue
         
@@ -454,7 +511,8 @@ export function TimesheetPage() {
               allowance_amount: calculatedAllowance,
               office: dayEntry.office,
               city: dayEntry.city,
-              country: dayEntry.country
+              country: dayEntry.country,
+              project_id: dayEntry.project_id
             })
             .eq('id', dayEntry.id)
           
@@ -478,11 +536,12 @@ export function TimesheetPage() {
               date,
               time_in: dayEntry.time_in,
               time_out: dayEntry.time_out,
-              status: dayEntry.status || 'active',
+              status: dayEntry.status || 'office',
               allowance_amount: calculatedAllowance,
               office: dayEntry.office,
               city: dayEntry.city,
-              country: dayEntry.country
+              country: dayEntry.country,
+              project_id: dayEntry.project_id
             })
             .select()
             .single()
@@ -520,11 +579,19 @@ export function TimesheetPage() {
             date,
             time_in: null,
             time_out: null,
-            status: 'active' as const,
+            status: 'office' as const,
             allowance_amount: 0,
             office: null,
             city: null,
             country: null,
+            project_id: null,
+            travel_start_time: null,
+            travel_end_time: null,
+            travel_from_location: null,
+            travel_to_location: null,
+            travel_custom_from_location: null,
+            travel_custom_to_location: null,
+            travel_description: null,
             created_at: '',
             updated_at: ''
           }),
@@ -535,8 +602,16 @@ export function TimesheetPage() {
     
     // Handle day status changes - implement business rules
     if (field === 'status') {
-      // If changing to day_off, vacation, or weekend_bank_holiday, clear time entries
-      if (value === 'day_off' || value === 'vacation' || value === 'weekend_bank_holiday') {
+      // If changing to travel, open the travel expense modal
+      if (value === 'travel') {
+        // Open travel expense modal to capture detailed travel information
+        setTimeout(() => {
+          openTravelExpenseModal(date)
+        }, 100) // Small delay to ensure state is updated
+      }
+      
+      // If changing to day_off, vacation, weekend, or bank_holiday, clear time entries
+      if (value === 'day_off' || value === 'vacation' || value === 'weekend' || value === 'bank_holiday') {
         setData(prev => ({
           ...prev,
           dayEntries: {
@@ -549,7 +624,15 @@ export function TimesheetPage() {
               allowance_amount: 0,
               office: null,
               city: null,
-              country: null
+              country: null,
+              project_id: null,
+              travel_start_time: null,
+              travel_end_time: null,
+              travel_from_location: null,
+              travel_to_location: null,
+              travel_custom_from_location: null,
+              travel_custom_to_location: null,
+              travel_description: null
             }
           }
         }))
@@ -568,7 +651,14 @@ export function TimesheetPage() {
                   status: value,
                   office: null,
                   city: null,
-                  country: null
+                  country: null,
+                  travel_start_time: null,
+                  travel_end_time: null,
+                  travel_from_location: null,
+                  travel_to_location: null,
+                  travel_custom_from_location: null,
+                  travel_custom_to_location: null,
+                  travel_description: null
                 }
               }
             }
@@ -640,7 +730,7 @@ export function TimesheetPage() {
         // Would need to fetch last week's data - simplified for now
         handleDayEntryChange(dateStr, 'time_in', '08:00')
         handleDayEntryChange(dateStr, 'time_out', '18:00')
-        handleDayEntryChange(dateStr, 'status', 'active')
+        handleDayEntryChange(dateStr, 'status', 'office')
         setExpandedDays(prev => ({ ...prev, [dateStr]: true }))
       })
       
@@ -663,12 +753,20 @@ export function TimesheetPage() {
     setShowExpenseModal(true)
   }
 
+  const openTravelExpenseModal = (dateStr: string, travelExpenseId?: string) => {
+    setCurrentModalDate(dateStr)
+    setEditingTravelExpenseId(travelExpenseId || null)
+    setShowTravelExpenseModal(true)
+  }
+
   const closeModals = () => {
     setShowProjectModal(false)
     setShowExpenseModal(false)
+    setShowTravelExpenseModal(false)
     setCurrentModalDate('')
     setEditingProjectId(null)
     setEditingExpenseId(null)
+    setEditingTravelExpenseId(null)
   }
 
   const saveProjectEntry = async (projectData: {
@@ -696,11 +794,28 @@ export function TimesheetPage() {
         
         if (error) throw error
       } else {
-        // Create new project entry via edge function
+        // Refresh session before creating project entry to avoid session expiration
+        console.log('Refreshing session before creating project entry...')
+        const sessionRefreshed = await refreshSessionIfNeeded()
+        if (!sessionRefreshed) {
+          console.error('Session refresh failed')
+          throw new Error('Session expired. Please log in again.')
+        }
+        
+        // Get current session to ensure we have a valid token
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.access_token) {
+          throw new Error('No valid session token. Please log in again.')
+        }
+        
+        // Create new project entry via edge function with explicit auth header
         const { data: result, error } = await supabase.functions.invoke('create-project-entry', {
           body: {
             date: currentModalDate,
             projectData
+          },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`
           }
         })
         
@@ -841,6 +956,12 @@ export function TimesheetPage() {
   }) => {
     if (!user) return
 
+    // Validate that projects exist before creating expenses
+    if ((data.projectEntries[currentModalDate] || []).length === 0) {
+      alert('Please add at least one project before adding expenses.')
+      return
+    }
+
     try {
       // Refresh session before making API calls to prevent 401 errors
       const sessionRefreshed = await refreshSessionIfNeeded()
@@ -868,9 +989,18 @@ export function TimesheetPage() {
         
         if (error) throw error
       } else {
-        // Create new expense entry via edge function
+        // Get current session to ensure we have a valid token
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.access_token) {
+          throw new Error('No valid session token. Please log in again.')
+        }
+        
+        // Create new expense entry via edge function with explicit auth header
         const { data: result, error } = await supabase.functions.invoke('create-expense-entry', {
-          body: expenseData
+          body: expenseData,
+          headers: {
+            Authorization: `Bearer ${session.access_token}`
+          }
         })
         
         if (error) {
@@ -921,6 +1051,158 @@ export function TimesheetPage() {
     }
   }
 
+  const saveTravelExpenseEntry = async (travelExpenseData: {
+    project_id: string
+    start_date: string
+    start_time: string
+    outbound_from: string
+    outbound_to: string
+    outbound_custom_from?: string
+    outbound_custom_to?: string
+    end_date: string
+    end_time: string
+    return_from: string
+    return_to: string
+    return_custom_from?: string
+    return_custom_to?: string
+    country: string
+    description?: string
+    expenses?: Array<{
+      id?: string
+      expense_type: string
+      description: string
+      gross_amount: string
+      vat_percentage: string
+      distance_km?: string
+      rate_per_km?: string
+    }>
+  }) => {
+    if (!user || !currentModalDate) return
+
+    // Validate that projects exist before creating travel expenses
+    if ((data.projectEntries[currentModalDate] || []).length === 0) {
+      alert('Please add at least one project before adding travel expenses.')
+      return
+    }
+
+    try {
+      // Refresh session before making API calls to prevent 401 errors
+      const sessionRefreshed = await refreshSessionIfNeeded()
+      if (!sessionRefreshed) {
+        throw new Error('Authentication session expired. Please log in again.')
+      }
+
+      const dayEntry = data.dayEntries[currentModalDate]
+      if (!dayEntry?.id) {
+        throw new Error('Day entry not found. Please save the timesheet first.')
+      }
+
+      // Transform the new data structure to match the existing database schema
+      const legacyTravelData = {
+        project_id: travelExpenseData.project_id,
+        start_time: travelExpenseData.start_time,
+        end_time: travelExpenseData.end_time,
+        from_location: travelExpenseData.outbound_from === 'other' ? travelExpenseData.outbound_custom_from : travelExpenseData.outbound_from,
+        to_location: travelExpenseData.outbound_to === 'other' ? travelExpenseData.outbound_custom_to : travelExpenseData.outbound_to,
+        country: travelExpenseData.country,
+        custom_from_location: travelExpenseData.outbound_custom_from,
+        custom_to_location: travelExpenseData.outbound_custom_to,
+        description: `Outbound: ${travelExpenseData.outbound_from} → ${travelExpenseData.outbound_to}. Return: ${travelExpenseData.return_from} → ${travelExpenseData.return_to}. ${travelExpenseData.description || ''}`
+      }
+
+      if (editingTravelExpenseId) {
+        // Update existing travel expense entry
+        const { error } = await supabase
+          .from('travel_expense_entries')
+          .update({
+            project_id: legacyTravelData.project_id,
+            start_time: legacyTravelData.start_time,
+            end_time: legacyTravelData.end_time,
+            from_location: legacyTravelData.from_location,
+            to_location: legacyTravelData.to_location,
+            country: legacyTravelData.country,
+            custom_from_location: legacyTravelData.custom_from_location || null,
+            custom_to_location: legacyTravelData.custom_to_location || null,
+            description: legacyTravelData.description || null
+          })
+          .eq('id', editingTravelExpenseId)
+        
+        if (error) throw error
+      } else {
+        // Create new travel expense entry
+        const { error } = await supabase
+          .from('travel_expense_entries')
+          .insert({
+            day_entry_id: dayEntry.id,
+            project_id: legacyTravelData.project_id,
+            start_time: legacyTravelData.start_time,
+            end_time: legacyTravelData.end_time,
+            from_location: legacyTravelData.from_location,
+            to_location: legacyTravelData.to_location,
+            country: legacyTravelData.country,
+            custom_from_location: legacyTravelData.custom_from_location || null,
+            custom_to_location: legacyTravelData.custom_to_location || null,
+            description: legacyTravelData.description || null
+          })
+        
+        if (error) throw error
+      }
+
+      // Handle expense entries if provided
+      if (travelExpenseData.expenses && travelExpenseData.expenses.length > 0) {
+        // Get current session for expense creation
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.access_token) {
+          throw new Error('No valid session token. Please log in again.')
+        }
+
+        // Create each expense entry
+        for (const expense of travelExpenseData.expenses) {
+          if (expense.expense_type && expense.gross_amount) {
+            const grossAmount = parseFloat(expense.gross_amount)
+            const vatPercentage = parseFloat(expense.vat_percentage)
+            
+            const expenseData = {
+              project_id: travelExpenseData.project_id,
+              expense_type: expense.expense_type,
+              date: currentModalDate,
+              description: expense.description || undefined,
+              gross_amount: grossAmount,
+              vat_percentage: vatPercentage,
+              distance_km: expense.distance_km ? parseFloat(expense.distance_km) : undefined,
+              rate_per_km: expense.rate_per_km ? parseFloat(expense.rate_per_km) : undefined
+            }
+
+            // Create expense entry via edge function
+            const { data: result, error: expenseError } = await supabase.functions.invoke('create-expense-entry', {
+              body: expenseData,
+              headers: {
+                Authorization: `Bearer ${session.access_token}`
+              }
+            })
+            
+            if (expenseError) {
+              console.error('Edge function error creating expense:', expenseError)
+              throw new Error(`Failed to create expense entry: ${expense.expense_type}`)
+            }
+            
+            if (!result.success) {
+              console.error('Expense creation failed:', result.error)
+              throw new Error(result.error || `Failed to create expense entry: ${expense.expense_type}`)
+            }
+          }
+        }
+      }
+
+      // Reload week data to refresh travel expense entries
+      await loadWeekData()
+      closeModals()
+    } catch (error) {
+      console.error('Error saving travel & expense entries:', error)
+      alert(`Failed to save travel & expense entries: ${error.message || 'Please try again.'}`)
+    }
+  }
+
   const deleteExpenseEntry = async (expenseId: string) => {
     try {
       const { error } = await supabase
@@ -932,6 +1214,20 @@ export function TimesheetPage() {
       await loadWeekData()
     } catch (error) {
       console.error('Error deleting expense entry:', error)
+    }
+  }
+
+  const deleteTravelExpenseEntry = async (travelExpenseId: string) => {
+    try {
+      const { error } = await supabase
+        .from('travel_expense_entries')
+        .delete()
+        .eq('id', travelExpenseId)
+      
+      if (error) throw error
+      await loadWeekData()
+    } catch (error) {
+      console.error('Error deleting travel expense entry:', error)
     }
   }
 
@@ -957,7 +1253,7 @@ export function TimesheetPage() {
       const dateStr = format(day, 'yyyy-MM-dd')
       handleDayEntryChange(dateStr, 'time_in', '08:00')
       handleDayEntryChange(dateStr, 'time_out', '18:00')
-      handleDayEntryChange(dateStr, 'status', 'active')
+      handleDayEntryChange(dateStr, 'status', 'office')
       handleDayEntryChange(dateStr, 'work_from', smartDefaults.lastCity || 'Office')
       handleDayEntryChange(dateStr, 'city', smartDefaults.lastCity)
       handleDayEntryChange(dateStr, 'country', smartDefaults.lastCountry)
@@ -986,7 +1282,7 @@ export function TimesheetPage() {
 
   const isFormDisabled = (dateStr: string) => {
     const dayEntry = data.dayEntries[dateStr]
-    return dayEntry?.status === 'day_off' || dayEntry?.status === 'vacation' || dayEntry?.status === 'weekend_bank_holiday'
+    return dayEntry?.status === 'day_off' || dayEntry?.status === 'vacation' || dayEntry?.status === 'weekend' || dayEntry?.status === 'bank_holiday'
   }
 
 
@@ -1095,7 +1391,6 @@ export function TimesheetPage() {
                 variant="secondary" 
                 size="sm" 
                 onClick={() => applyPreset('weekdays')}
-                icon={<Clock className="h-4 w-4" />}
                 className={clsx(
                   "shadow-sm",
                   {
@@ -1103,7 +1398,8 @@ export function TimesheetPage() {
                   }
                 )}
               >
-                Mon-Fri 8-18
+                <Clock className="h-4 w-4" />
+                Fill Weekdays
               </Button>
               
               <Button 
@@ -1153,7 +1449,6 @@ export function TimesheetPage() {
                 onClick={handleSave}
                 loading={saving}
                 disabled={isReadOnly || loading}
-                icon={<Save className="h-4 w-4" />}
                 className={clsx(
                   "shadow-lg",
                   {
@@ -1161,7 +1456,8 @@ export function TimesheetPage() {
                   }
                 )}
               >
-                {saving ? 'Saving...' : 'Save'}
+                <Save className="h-4 w-4" />
+                Save Timesheet
               </Button>
               
               {data.week?.status === 'draft' && (
@@ -1183,8 +1479,44 @@ export function TimesheetPage() {
         </div>
       </div>
 
-      {/* Timesheet Grid */}
+      {/* Project Assignments Section */}
       <div className="modern-card glass-card overflow-hidden">
+        <div className="border-b border-border/30 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground flex items-center">
+                <BarChart3 className="h-5 w-5 mr-2 text-primary" />
+                Project Assignments
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                {(() => {
+                  let totalProjects = 0
+                  Object.values(data.projectEntries).forEach(dayProjects => {
+                    totalProjects += dayProjects.length
+                  })
+                  return totalProjects
+                })()}{' Projects'}
+              </p>
+            </div>
+            {!isReadOnly && (
+              <Button 
+                variant="primary" 
+                size="sm"
+                onClick={() => {
+                  // Find the first day with data or current day
+                  const today = format(new Date(), 'yyyy-MM-dd')
+                  const currentWeekDay = weekDays.find(day => format(day, 'yyyy-MM-dd') === today)
+                  const targetDate = currentWeekDay ? today : format(weekDays[0], 'yyyy-MM-dd')
+                  openProjectModal(targetDate)
+                }}
+                className="shadow-lg"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Add Project
+              </Button>
+            )}
+          </div>
+        </div>
         <div className="p-4">
           {loading ? (
             <div className="text-center py-12">
@@ -1348,7 +1680,7 @@ export function TimesheetPage() {
                               </div>
                               
                               <Select
-                                value={dayEntry?.status || 'active'}
+                                value={dayEntry?.status || 'office'}
                                 onChange={(e) => {
                                   handleDayEntryChange(dateStr, 'status', e.target.value)
                                   // Auto-expand if status is changed (accordion behavior)
@@ -1372,12 +1704,22 @@ export function TimesheetPage() {
                                 )}
                                 disabled={isReadOnly}
                                 onClick={(e) => e.stopPropagation()}
-                                options={[
+                                options={isWeekend ? [
+                                  { value: 'weekend', label: 'Weekend' },
+                                  { value: 'day_off', label: 'Day Off' },
+                                  { value: 'vacation', label: 'Vacation' },
+                                  { value: 'bank_holiday', label: 'Bank Holiday' },
+                                  { value: 'travel', label: 'Travel' },
+                                  { value: 'office', label: 'Office' },
+                                  { value: 'active', label: 'Active' }
+                                ] : [
+                                  { value: 'office', label: 'Office' },
                                   { value: 'active', label: 'Active' },
                                   { value: 'day_off', label: 'Day Off' },
                                   { value: 'vacation', label: 'Vacation' },
                                   { value: 'travel', label: 'Travel' },
-                                  { value: 'weekend_bank_holiday', label: 'Weekend / Bank Holiday' }
+                                  { value: 'weekend', label: 'Weekend' },
+                                  { value: 'bank_holiday', label: 'Bank Holiday' }
                                 ]}
                                 label={isMobile ? "Status" : undefined}
                                 variant={isMobile ? "floating" : "default"}
@@ -1393,11 +1735,35 @@ export function TimesheetPage() {
                             office={dayEntry?.office}
                             city={dayEntry?.city}
                             country={dayEntry?.country}
+                            projectId={dayEntry?.project_id}
                             countries={countries}
+                            projects={projects}
                             citySuggestions={citySuggestions}
                             isMobile={isMobile}
                             isReadOnly={isReadOnly}
-                            onChange={(field, value) => handleDayEntryChange(dateStr, field, value)}
+                            onChange={(field, value) => {
+                              handleDayEntryChange(dateStr, field, value)
+                              // Update smart defaults when user changes values
+                              if (field === 'office' && value) {
+                                setSmartDefaults(prev => ({ 
+                                  ...prev, 
+                                  lastOffice: value,
+                                  recentOffices: [value, ...prev.recentOffices.filter(o => o !== value)].slice(0, 5)
+                                }))
+                              }
+                              if (field === 'city' && value) {
+                                setSmartDefaults(prev => ({ ...prev, lastCity: value }))
+                              }
+                              if (field === 'country' && value) {
+                                setSmartDefaults(prev => ({ ...prev, lastCountry: value }))
+                              }
+                            }}
+                            smartDefaults={{
+                              lastOffice: smartDefaults.lastOffice,
+                              lastCity: smartDefaults.lastCity,
+                              lastCountry: smartDefaults.lastCountry,
+                              recentOffices: smartDefaults.recentOffices
+                            }}
                           />
                         )}
                         
@@ -1476,10 +1842,17 @@ export function TimesheetPage() {
                       <div className="border-t border-border/50 bg-card/50 p-4 space-y-4">
                         {/* Project Entries */}
                         <div className="space-y-3">
+                        {/* Project Assignments */}
+                        <div className="space-y-3">
                           <div className="flex items-center justify-between">
                             <div>
-                              <h4 className="text-sm font-semibold text-foreground">Project Work</h4>
-                              <p className="text-xs text-muted-foreground">Track your project activities for this day</p>
+                              <h4 className="text-sm font-semibold text-foreground flex items-center">
+                                <span className="bg-primary/20 text-primary px-2 py-1 rounded text-xs mr-2">
+                                  {(data.projectEntries[dateStr] || []).length} Project{(data.projectEntries[dateStr] || []).length !== 1 ? 's' : ''}
+                                </span>
+                                Project Assignments
+                              </h4>
+                              <p className="text-xs text-muted-foreground">Add projects first to enable expense tracking</p>
                             </div>
                             {!isReadOnly && (
                               <div className="flex items-center space-x-2">
@@ -1491,15 +1864,6 @@ export function TimesheetPage() {
                                 >
                                   <Plus className="h-3 w-3 mr-1" />
                                   Add Project
-                                </Button>
-                                <Button 
-                                  size="sm" 
-                                  variant="outline" 
-                                  className="interactive h-8 px-3 text-xs"
-                                  onClick={() => openExpenseModal(dateStr)}
-                                >
-                                  <Plus className="h-3 w-3 mr-1" />
-                                  Add Expense
                                 </Button>
                               </div>
                             )}
@@ -1566,214 +1930,332 @@ export function TimesheetPage() {
                               })}
                             </div>
                           ) : (
-                            <div className="bg-muted/30 rounded-lg p-6 text-center border border-dashed border-muted">
+                            <div className="bg-muted/20 rounded-lg p-4 text-center border-2 border-dashed border-muted">
                               <div className="text-muted-foreground">
                                 <BarChart3 className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                <p className="text-sm font-medium mb-1">No project entries yet</p>
-                                <p className="text-xs">Click "Add Project" to start tracking your work</p>
+                                <p className="text-sm font-medium mb-1">No projects assigned for this day</p>
+                                <p className="text-xs mb-3">Add projects first to enable expense tracking</p>
+                                {!isReadOnly && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => openProjectModal(dateStr)}
+                                    className="text-primary border-primary hover:bg-primary/10"
+                                  >
+                                    <Plus className="h-4 w-4 mr-1" />
+                                    Add First Project
+                                  </Button>
+                                )}
                               </div>
                             </div>
                           )}
                         </div>
                         
-                        {/* Cost Entries */}
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="text-sm font-semibold text-foreground">Travel & Expenses</h4>
-                              <p className="text-xs text-muted-foreground">Log your business expenses for this day</p>
-                            </div>
-                            {!isReadOnly && (
-                              <Button 
-                                size="sm" 
-                                variant="outline" 
-                                className="interactive h-8 px-3 text-xs"
-                                onClick={() => openExpenseModal(dateStr)}
-                              >
-                                <Plus className="h-3 w-3 mr-1" />
-                                Add Expense
-                              </Button>
-                            )}
-                          </div>
                           
-                          {/* Display existing cost entries */}
-                          {data.costEntries[dateStr] && data.costEntries[dateStr].length > 0 ? (
-                            <div className="space-y-2">
-                              {data.costEntries[dateStr].map((costEntry: CostEntry) => (
-                                <div key={costEntry.id} className="bg-card border border-border rounded-lg p-3">
-                                  <div className="flex items-start justify-between">
-                                    <div className="flex-1">
-                                      <div className="flex items-center space-x-2 mb-1">
-                                        <span className={clsx(
-                                          'px-2 py-1 text-xs rounded-full font-medium capitalize',
-                                          {
-                                            'bg-blue-100 text-blue-800': costEntry.type === 'car' || costEntry.type === 'taxi',
-                                            'bg-purple-100 text-purple-800': costEntry.type === 'hotel',
-                                            'bg-green-100 text-green-800': costEntry.type === 'meal',
-                                            'bg-gray-100 text-gray-800': costEntry.type === 'other',
-                                          }
-                                        )}>
-                                          {costEntry.type}
-                                        </span>
-                                        {costEntry.chargeable && (
-                                          <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800 font-medium">
-                                            Chargeable
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="flex items-center space-x-4 text-sm text-muted-foreground mb-1">
-                                        <span className="font-medium">
-                                          ${costEntry.gross_amount.toFixed(2)} 
-                                          <span className="text-xs">(incl. {costEntry.vat_percentage}% VAT)</span>
-                                        </span>
-                                        {costEntry.distance_km && (
-                                          <span>{costEntry.distance_km} km</span>
-                                        )}
-                                      </div>
-                                      {costEntry.notes && (
-                                        <p className="text-sm text-muted-foreground">{costEntry.notes}</p>
-                                      )}
-                                    </div>
-                                    {!isReadOnly && (
-                                      <div className="flex items-center space-x-2 ml-4">
-                                        <Button 
-                                          size="sm" 
-                                          variant="ghost"
-                                          onClick={() => openExpenseModal(dateStr, costEntry.id)}
-                                          className="text-muted-foreground hover:text-foreground"
-                                        >
-                                          Edit
-                                        </Button>
-                                        <Button 
-                                          size="sm" 
-                                          variant="ghost"
-                                          onClick={() => deleteCostEntry(costEntry.id)}
-                                          className="text-muted-foreground hover:text-destructive"
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                      </div>
-                                    )}
+                          
+                          {/* Display all expenses grouped by project */}
+                          {(() => {
+                            const allExpenses = [
+                              ...(data.costEntries[dateStr] || []).map(entry => ({ ...entry, type: 'cost', projectId: null })),
+                              ...(data.expenseEntries[dateStr] || []).map(entry => ({ ...entry, type: 'expense', projectId: entry.project_id }))
+                            ]
+                            
+                            if (allExpenses.length === 0) {
+                              return (
+                                <div className="bg-muted/20 rounded-lg p-4 text-center border-2 border-dashed border-muted">
+                                  <div className="text-muted-foreground">
+                                    <Clock className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                    <p className="text-sm font-medium mb-1">
+                                      {(data.projectEntries[dateStr] || []).length === 0 
+                                        ? 'Add projects first to enable expenses'
+                                        : 'No expenses recorded'
+                                      }
+                                    </p>
+                                    <p className="text-xs">
+                                      {(data.projectEntries[dateStr] || []).length === 0 
+                                        ? 'Projects are required before adding any expenses'
+                                        : 'Add travel costs, meals, or other business expenses'
+                                      }
+                                    </p>
                                   </div>
                                 </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="bg-muted/30 rounded-lg p-6 text-center border border-dashed border-muted">
-                              <div className="text-muted-foreground">
-                                <Clock className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                <p className="text-sm font-medium mb-1">No expenses recorded</p>
-                                <p className="text-xs">Add travel costs, meals, or other business expenses</p>
+                              )
+                            }
+                            
+                            // Group expenses by project
+                            const expensesByProject = allExpenses.reduce((acc, expense) => {
+                              const projectId = expense.projectId || 'unassigned'
+                              if (!acc[projectId]) acc[projectId] = []
+                              acc[projectId].push(expense)
+                              return acc
+                            }, {})
+                            
+                            return (
+                              <div className="space-y-3">
+                                {Object.entries(expensesByProject).map(([projectId, projectExpenses]: [string, any[]]) => {
+                                  const project = projectId !== 'unassigned' ? projects.find(p => p.id === projectId) : null
+                                  return (
+                                    <div key={projectId} className="bg-card/50 border border-border/50 rounded-lg p-3">
+                                      <div className="flex items-center space-x-2 mb-3">
+                                        <span className="text-sm font-semibold text-foreground">
+                                          {project ? project.name : 'Legacy Expenses'}
+                                        </span>
+                                        <span className="bg-secondary/10 text-secondary px-2 py-1 rounded text-xs">
+                                          {projectExpenses.length} expense{projectExpenses.length !== 1 ? 's' : ''}
+                                        </span>
+                                      </div>
+                                      <div className="space-y-2">
+                                        {projectExpenses.map((expense) => {
+                                          if (expense.type === 'cost') {
+                                            return (
+                                              <div key={expense.id} className="bg-card border border-border rounded-lg p-3">
+                                                <div className="flex items-start justify-between">
+                                                  <div className="flex-1">
+                                                    <div className="flex items-center space-x-2 mb-1">
+                                                      <span className={clsx(
+                                                        'px-2 py-1 text-xs rounded-full font-medium capitalize',
+                                                        {
+                                                          'bg-blue-100 text-blue-800': expense.type === 'car' || expense.type === 'taxi',
+                                                          'bg-purple-100 text-purple-800': expense.type === 'hotel',
+                                                          'bg-green-100 text-green-800': expense.type === 'meal',
+                                                          'bg-gray-100 text-gray-800': expense.type === 'other',
+                                                        }
+                                                      )}>
+                                                        {expense.type}
+                                                      </span>
+                                                      {expense.chargeable && (
+                                                        <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800 font-medium">
+                                                          Chargeable
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                    <div className="flex items-center space-x-4 text-sm text-muted-foreground mb-1">
+                                                      <span className="font-medium">
+                                                        ${expense.gross_amount.toFixed(2)} 
+                                                        <span className="text-xs">(incl. {expense.vat_percentage}% VAT)</span>
+                                                      </span>
+                                                      {expense.distance_km && (
+                                                        <span>{expense.distance_km} km</span>
+                                                      )}
+                                                    </div>
+                                                    {expense.notes && (
+                                                      <p className="text-sm text-muted-foreground">{expense.notes}</p>
+                                                    )}
+                                                  </div>
+                                                  {!isReadOnly && (
+                                                    <div className="flex items-center space-x-2 ml-4">
+                                                      <Button 
+                                                        size="sm" 
+                                                        variant="ghost"
+                                                        onClick={() => openExpenseModal(dateStr, expense.id)}
+                                                        className="text-muted-foreground hover:text-foreground"
+                                                      >
+                                                        Edit
+                                                      </Button>
+                                                      <Button 
+                                                        size="sm" 
+                                                        variant="ghost"
+                                                        onClick={() => deleteCostEntry(expense.id)}
+                                                        className="text-muted-foreground hover:text-destructive"
+                                                      >
+                                                        <Trash2 className="h-4 w-4" />
+                                                      </Button>
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            )
+                                          } else {
+                                            return (
+                                              <div key={expense.id} className="bg-card border border-border rounded-lg p-3">
+                                                <div className="flex items-start justify-between">
+                                                  <div className="flex-1">
+                                                    <div className="flex items-center space-x-2 mb-1">
+                                                      <span className={clsx(
+                                                        'px-2 py-1 text-xs rounded-full font-medium capitalize',
+                                                        {
+                                                          'bg-blue-100 text-blue-800': expense.expense_type === 'car' || expense.expense_type === 'taxi',
+                                                          'bg-purple-100 text-purple-800': expense.expense_type === 'hotel',
+                                                          'bg-green-100 text-green-800': expense.expense_type === 'train' || expense.expense_type === 'onpv',
+                                                          'bg-orange-100 text-orange-800': expense.expense_type === 'flight',
+                                                          'bg-gray-100 text-gray-800': ['fuel', 'parking', 'hospitality', 'others'].includes(expense.expense_type),
+                                                          'bg-yellow-100 text-yellow-800': expense.expense_type === 'rental_car',
+                                                        }
+                                                      )}>
+                                                        {expense.expense_type.replace('_', ' ')}
+                                                      </span>
+                                                    </div>
+                                                    <div className="flex items-center space-x-4 text-sm text-muted-foreground mb-1">
+                                                      <span className="font-medium">
+                                                        €{expense.gross_amount.toFixed(2)} 
+                                                        <span className="text-xs">(incl. {expense.vat_percentage}% VAT)</span>
+                                                      </span>
+                                                      {expense.distance_km && (
+                                                        <span>{expense.distance_km} km × €{expense.rate_per_km}/km</span>
+                                                      )}
+                                                    </div>
+                                                    {expense.description && (
+                                                      <p className="text-sm text-muted-foreground">{expense.description}</p>
+                                                    )}
+                                                    <div className="mt-2 text-xs text-muted-foreground bg-muted/30 rounded px-2 py-1 inline-block">
+                                                      Net: €{expense.net_amount.toFixed(2)} + VAT: €{expense.vat_amount.toFixed(2)}
+                                                    </div>
+                                                  </div>
+                                                  {!isReadOnly && (
+                                                    <div className="flex items-center space-x-2 ml-4">
+                                                      <Button 
+                                                        size="sm" 
+                                                        variant="ghost"
+                                                        onClick={() => openExpenseModal(dateStr, expense.id)}
+                                                        className="text-muted-foreground hover:text-foreground"
+                                                      >
+                                                        Edit
+                                                      </Button>
+                                                      <Button 
+                                                        size="sm" 
+                                                        variant="ghost"
+                                                        onClick={() => deleteExpenseEntry(expense.id)}
+                                                        className="text-muted-foreground hover:text-destructive"
+                                                      >
+                                                        <Trash2 className="h-4 w-4" />
+                                                      </Button>
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            )
+                                          }
+                                        })}
+                                      </div>
+                                    </div>
+                                  )
+                                })}
                               </div>
-                            </div>
-                          )}
+                            )
+                          })()}
                         </div>
                         
-                        {/* New Expense Entries */}
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="text-sm font-semibold text-foreground">Expense Entries</h4>
-                              <p className="text-xs text-muted-foreground">Project-specific expenses with intelligent VAT handling</p>
+                        {/* Travel Expense Entries - Only show for travel days */}
+                        {dayEntry?.status === 'travel' && (
+                          <div className="space-y-3 bg-travel/5 border border-travel/20 rounded-lg p-4">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h4 className="text-sm font-semibold text-foreground flex items-center">
+                                  <svg className="h-4 w-4 mr-2 text-travel" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  </svg>
+                                  Travel Expense Details
+                                </h4>
+                                <p className="text-xs text-muted-foreground">Detailed travel information with location and timing data</p>
+                              </div>
+                              {!isReadOnly && (
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  className="interactive h-8 px-3 text-xs border-travel text-travel hover:bg-travel/10"
+                                  onClick={() => openTravelExpenseModal(dateStr)}
+                                >
+                                  <Plus className="h-3 w-3 mr-1" />
+                                   Add Travel & Expenses
+                                </Button>
+                              )}
                             </div>
-                          </div>
-                          
-                          {/* Display existing expense entries */}
-                          {data.expenseEntries[dateStr] && data.expenseEntries[dateStr].length > 0 ? (
-                            <div className="space-y-2">
-                              {data.expenseEntries[dateStr].map((expenseEntry: ExpenseEntry) => {
-                                const project = projects.find(p => p.id === expenseEntry.project_id)
-                                return (
-                                  <div key={expenseEntry.id} className="bg-card border border-border rounded-lg p-3">
-                                    <div className="flex items-start justify-between">
-                                      <div className="flex-1">
-                                        <div className="flex items-center space-x-2 mb-1">
-                                          <span className="text-sm font-semibold text-foreground">
-                                            {project?.name || 'Unknown Project'}
-                                          </span>
-                                          <span className={clsx(
-                                            'px-2 py-1 text-xs rounded-full font-medium capitalize',
-                                            {
-                                              'bg-blue-100 text-blue-800': expenseEntry.expense_type === 'car' || expenseEntry.expense_type === 'taxi',
-                                              'bg-purple-100 text-purple-800': expenseEntry.expense_type === 'hotel',
-                                              'bg-green-100 text-green-800': expenseEntry.expense_type === 'train' || expenseEntry.expense_type === 'onpv',
-                                              'bg-orange-100 text-orange-800': expenseEntry.expense_type === 'flight',
-                                              'bg-gray-100 text-gray-800': ['fuel', 'parking', 'hospitality', 'others'].includes(expenseEntry.expense_type),
-                                              'bg-yellow-100 text-yellow-800': expenseEntry.expense_type === 'rental_car',
-                                            }
-                                          )}>
-                                            {expenseEntry.expense_type.replace('_', ' ')}
-                                          </span>
-                                        </div>
-                                        <div className="flex items-center space-x-4 text-sm text-muted-foreground mb-1">
-                                          <span className="font-medium">
-                                            €{expenseEntry.gross_amount.toFixed(2)} 
-                                            <span className="text-xs">(incl. {expenseEntry.vat_percentage}% VAT)</span>
-                                          </span>
-                                          {expenseEntry.distance_km && (
-                                            <span>{expenseEntry.distance_km} km × €{expenseEntry.rate_per_km}/km</span>
+                            
+                            {/* Display existing travel expense entries */}
+                            {data.travelExpenseEntries[dateStr] && data.travelExpenseEntries[dateStr].length > 0 ? (
+                              <div className="space-y-2">
+                                {data.travelExpenseEntries[dateStr].map((travelEntry: TravelExpenseEntry) => {
+                                  const project = projects.find(p => p.id === travelEntry.project_id)
+                                  return (
+                                    <div key={travelEntry.id} className="bg-card border border-border rounded-lg p-3">
+                                      <div className="flex items-start justify-between">
+                                        <div className="flex-1">
+                                          <div className="flex items-center space-x-2 mb-2">
+                                            <span className="text-sm font-semibold text-foreground">
+                                              {project?.name || 'Unknown Project'}
+                                            </span>
+                                            <span className="px-2 py-1 text-xs rounded-full font-medium bg-travel/20 text-travel">
+                                              Travel Details
+                                            </span>
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-3 text-sm text-muted-foreground mb-2">
+                                            <div>
+                                              <span className="font-medium">Time:</span> {travelEntry.start_time} - {travelEntry.end_time}
+                                            </div>
+                                            <div>
+                                              <span className="font-medium">Country:</span> {travelEntry.country}
+                                            </div>
+                                            <div className="col-span-2">
+                                              <span className="font-medium">Route:</span> {travelEntry.from_location} → {travelEntry.to_location}
+                                            </div>
+                                          </div>
+                                          {travelEntry.description && (
+                                            <p className="text-sm text-muted-foreground bg-muted/30 rounded px-2 py-1">
+                                              {travelEntry.description}
+                                            </p>
                                           )}
                                         </div>
-                                        {expenseEntry.description && (
-                                          <p className="text-sm text-muted-foreground">{expenseEntry.description}</p>
+                                        {!isReadOnly && (
+                                          <div className="flex items-center space-x-2 ml-4">
+                                            <Button 
+                                              size="sm" 
+                                              variant="ghost"
+                                              onClick={() => openTravelExpenseModal(dateStr, travelEntry.id)}
+                                              className="text-muted-foreground hover:text-foreground"
+                                            >
+                                              Edit
+                                            </Button>
+                                            <Button 
+                                              size="sm" 
+                                              variant="ghost"
+                                              onClick={() => deleteTravelExpenseEntry(travelEntry.id)}
+                                              className="text-muted-foreground hover:text-destructive"
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                          </div>
                                         )}
-                                        <div className="mt-2 text-xs text-muted-foreground bg-muted/30 rounded px-2 py-1 inline-block">
-                                          Net: €{expenseEntry.net_amount.toFixed(2)} + VAT: €{expenseEntry.vat_amount.toFixed(2)}
-                                        </div>
                                       </div>
-                                      {!isReadOnly && (
-                                        <div className="flex items-center space-x-2 ml-4">
-                                          <Button 
-                                            size="sm" 
-                                            variant="ghost"
-                                            onClick={() => openExpenseModal(dateStr, expenseEntry.id)}
-                                            className="text-muted-foreground hover:text-foreground"
-                                          >
-                                            Edit
-                                          </Button>
-                                          <Button 
-                                            size="sm" 
-                                            variant="ghost"
-                                            onClick={() => deleteExpenseEntry(expenseEntry.id)}
-                                            className="text-muted-foreground hover:text-destructive"
-                                          >
-                                            <Trash2 className="h-4 w-4" />
-                                          </Button>
-                                        </div>
-                                      )}
                                     </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          ) : (
-                            <div className="bg-muted/30 rounded-lg p-4 text-center border border-dashed border-muted">
-                              <div className="text-muted-foreground">
-                                <BarChart3 className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                                <p className="text-xs font-medium mb-1">No project expenses</p>
-                                <p className="text-xs">Add project-specific expenses with smart VAT calculations</p>
+                                  )
+                                })}
                               </div>
-                            </div>
-                          )}
-                        </div>
+                            ) : (
+                              <div className="bg-muted/30 rounded-lg p-4 text-center border border-dashed border-muted">
+                                <div className="text-muted-foreground">
+                                  <svg className="h-6 w-6 mx-auto mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  </svg>
+                                  <p className="text-xs font-medium mb-1">No travel details recorded</p>
+                                  <p className="text-xs">Click 'Add Travel Details' to record your travel information</p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         
                         {/* Summary */}
                         <div className="flex justify-between items-center pt-4 border-t border-border/30">
                           <div className="text-sm text-muted-foreground">
                             Daily summary for {format(day, 'EEEE, MMMM d')}
                           </div>
-                          <div className="text-sm font-semibold">
-                            <span className="text-muted-foreground">Daily Allowance: </span>
-                            <span className={clsx(
-                              'font-bold',
-                              {
-                                'text-success': dayEntry && calculateDailyAllowance(dayEntry) > 0,
-                                'text-muted-foreground': !dayEntry || calculateDailyAllowance(dayEntry) === 0,
-                              }
-                            )}>
-                              {dayEntry ? `${getCurrencySymbol(defaultCurrency)}${calculateDailyAllowance(dayEntry).toFixed(2)}` : `${getCurrencySymbol(defaultCurrency)}0.00`}
-                            </span>
-                          </div>
+                          {/* Conditional Daily Allowance - Only show for travel days */}
+                          {dayEntry?.status === 'travel' && (
+                            <div className="text-sm font-semibold">
+                              <span className="text-muted-foreground">Daily Allowance: </span>
+                              <span className={clsx(
+                                'font-bold',
+                                {
+                                  'text-success': dayEntry && calculateDailyAllowance(dayEntry) > 0,
+                                  'text-muted-foreground': !dayEntry || calculateDailyAllowance(dayEntry) === 0,
+                                }
+                              )}>
+                                {dayEntry ? `${getCurrencySymbol(defaultCurrency)}${calculateDailyAllowance(dayEntry).toFixed(2)}` : `${getCurrencySymbol(defaultCurrency)}0.00`}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1782,6 +2264,412 @@ export function TimesheetPage() {
               })}
             </div>
           )}
+        </div>
+      </div>
+      
+      {/* Expenses Section */}
+      <div className="modern-card glass-card overflow-hidden">
+        <div className="border-b border-border/30 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground flex items-center">
+                <Receipt className="h-5 w-5 mr-2 text-secondary" />
+                Expenses
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                {(() => {
+                  let totalExpenses = 0
+                  Object.values(data.expenseEntries).forEach(dayExpenses => {
+                    totalExpenses += dayExpenses.length
+                  })
+                  Object.values(data.costEntries).forEach(dayCosts => {
+                    totalExpenses += dayCosts.length
+                  })
+                  Object.values(data.travelExpenseEntries).forEach(dayTravelExpenses => {
+                    totalExpenses += dayTravelExpenses.length
+                  })
+                  return totalExpenses
+                })()}{' Expenses'}
+              </p>
+            </div>
+            <div className="flex items-center space-x-2">
+              {!isReadOnly && (
+                <>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => {
+                      // Check if any projects exist
+                      const hasProjects = Object.values(data.projectEntries).some(dayProjects => dayProjects.length > 0)
+                      if (!hasProjects) {
+                        alert('Please add at least one project before adding expenses.')
+                        return
+                      }
+                      // Find the first day with projects or current day
+                      const today = format(new Date(), 'yyyy-MM-dd')
+                      const currentWeekDay = weekDays.find(day => format(day, 'yyyy-MM-dd') === today)
+                      let targetDate = currentWeekDay ? today : format(weekDays[0], 'yyyy-MM-dd')
+                      
+                      // If the target date has no projects, find the first day with projects
+                      if ((data.projectEntries[targetDate] || []).length === 0) {
+                        const dayWithProjects = Object.keys(data.projectEntries).find(date => 
+                          (data.projectEntries[date] || []).length > 0
+                        )
+                        if (dayWithProjects) targetDate = dayWithProjects
+                      }
+                      
+                      openExpenseModal(targetDate)
+                    }}
+                    className="shadow-sm"
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Normal Expense
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => {
+                      // Check if any projects exist
+                      const hasProjects = Object.values(data.projectEntries).some(dayProjects => dayProjects.length > 0)
+                      if (!hasProjects) {
+                        alert('Please add at least one project before adding travel expenses.')
+                        return
+                      }
+                      // Find the first travel day with projects
+                      const travelDayWithProjects = weekDays.find(day => {
+                        const dateStr = format(day, 'yyyy-MM-dd')
+                        const dayEntry = data.dayEntries[dateStr]
+                        return dayEntry?.status === 'travel' && (data.projectEntries[dateStr] || []).length > 0
+                      })
+                      
+                      let targetDate = format(weekDays[0], 'yyyy-MM-dd')
+                      if (travelDayWithProjects) {
+                        targetDate = format(travelDayWithProjects, 'yyyy-MM-dd')
+                      } else {
+                        // If no travel day with projects, find any day with projects
+                        const dayWithProjects = Object.keys(data.projectEntries).find(date => 
+                          (data.projectEntries[date] || []).length > 0
+                        )
+                        if (dayWithProjects) targetDate = dayWithProjects
+                      }
+                      
+                      openTravelExpenseModal(targetDate)
+                    }}
+                    className="shadow-sm border-travel text-travel hover:bg-travel/10"
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Travel & Expenses
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="p-4">
+          {(() => {
+            // Collect all expenses across the week and group by project
+            const allWeekExpenses = []
+            
+            // Collect all expenses from all days
+            weekDays.forEach(day => {
+              const dateStr = format(day, 'yyyy-MM-dd')
+              
+              // Normal expense entries
+              if (data.expenseEntries[dateStr]) {
+                data.expenseEntries[dateStr].forEach(expense => {
+                  allWeekExpenses.push({
+                    ...expense,
+                    type: 'expense',
+                    date: dateStr,
+                    projectId: expense.project_id
+                  })
+                })
+              }
+              
+              // Cost entries (legacy, may not have project association)
+              if (data.costEntries[dateStr]) {
+                data.costEntries[dateStr].forEach(cost => {
+                  allWeekExpenses.push({
+                    ...cost,
+                    type: 'cost',
+                    date: dateStr,
+                    projectId: null // Legacy expenses don't have project association
+                  })
+                })
+              }
+              
+              // Travel expense entries
+              if (data.travelExpenseEntries[dateStr]) {
+                data.travelExpenseEntries[dateStr].forEach(travelExpense => {
+                  allWeekExpenses.push({
+                    ...travelExpense,
+                    type: 'travel',
+                    date: dateStr,
+                    projectId: travelExpense.project_id
+                  })
+                })
+              }
+            })
+            
+            if (allWeekExpenses.length === 0) {
+              return (
+                <div className="text-center py-8">
+                  <div className="text-muted-foreground">
+                    <Receipt className="h-8 w-8 mx-auto mb-3 opacity-50" />
+                    <p className="font-medium mb-2">No expenses recorded this week</p>
+                    <p className="text-sm">Add projects first, then use the buttons above to add expenses</p>
+                  </div>
+                </div>
+              )
+            }
+            
+            // Group expenses by project
+            const expensesByProject = allWeekExpenses.reduce((acc, expense) => {
+              const projectId = expense.projectId || 'unassigned'
+              if (!acc[projectId]) {
+                acc[projectId] = []
+              }
+              acc[projectId].push(expense)
+              return acc
+            }, {})
+            
+            return (
+              <div className="space-y-6">
+                {Object.entries(expensesByProject).map(([projectId, projectExpenses]: [string, any[]]) => {
+                  const project = projectId !== 'unassigned' 
+                    ? projects.find(p => p.id === projectId) 
+                    : null
+                    
+                  // Calculate project total
+                  const projectTotal = projectExpenses.reduce((total, expense) => {
+                    if (expense.type === 'expense' || expense.type === 'cost') {
+                      return total + (expense.gross_amount || 0)
+                    }
+                    return total
+                  }, 0)
+                  
+                  return (
+                    <div key={projectId} className="bg-card/50 border border-border/50 rounded-lg overflow-hidden">
+                      {/* Project Header */}
+                      <div className="border-b border-border/30 px-4 py-3 bg-accent/10">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="font-semibold text-foreground flex items-center">
+                              <BarChart3 className="h-4 w-4 mr-2 text-primary" />
+                              {project ? project.name : 'Legacy Expenses'}
+                            </h3>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm font-semibold text-foreground">
+                              €{projectTotal.toFixed(2)}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {projectExpenses.length} expense{projectExpenses.length !== 1 ? 's' : ''}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Expense List */}
+                      <div className="p-4 space-y-3">
+                        {projectExpenses.map((expense, index) => {
+                          const expenseDate = new Date(expense.date)
+                          
+                          if (expense.type === 'expense') {
+                            return (
+                              <div key={`expense-${expense.id || index}`} className="bg-card border border-border rounded-lg p-3">
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center space-x-2 mb-2">
+                                      <span className="text-sm font-medium text-foreground">
+                                        {format(expenseDate, 'EEE, MMM d')}
+                                      </span>
+                                      <span className={clsx(
+                                        'px-2 py-1 text-xs rounded-full font-medium capitalize',
+                                        {
+                                          'bg-blue-100 text-blue-800': ['car', 'taxi', 'rental_car'].includes(expense.expense_type),
+                                          'bg-purple-100 text-purple-800': expense.expense_type === 'hotel',
+                                          'bg-green-100 text-green-800': ['train', 'onpv'].includes(expense.expense_type),
+                                          'bg-orange-100 text-orange-800': expense.expense_type === 'flight',
+                                          'bg-gray-100 text-gray-800': ['fuel', 'parking', 'hospitality', 'others'].includes(expense.expense_type),
+                                        }
+                                      )}>
+                                        {expense.expense_type?.replace('_', ' ') || 'Expense'}
+                                      </span>
+                                    </div>
+                                    <div className="text-sm text-muted-foreground mb-1">
+                                      <span className="font-medium">€{expense.gross_amount.toFixed(2)}</span>
+                                      <span className="text-xs ml-1">(incl. {expense.vat_percentage}% VAT)</span>
+                                      {expense.distance_km && (
+                                        <span className="ml-3">{expense.distance_km} km × €{expense.rate_per_km}/km</span>
+                                      )}
+                                    </div>
+                                    {expense.description && (
+                                      <p className="text-sm text-muted-foreground">{expense.description}</p>
+                                    )}
+                                    <div className="mt-1 text-xs text-muted-foreground bg-muted/30 rounded px-2 py-1 inline-block">
+                                      Net: €{expense.net_amount?.toFixed(2)} + VAT: €{expense.vat_amount?.toFixed(2)}
+                                    </div>
+                                  </div>
+                                  {!isReadOnly && (
+                                    <div className="flex items-center space-x-2 ml-4">
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        onClick={() => {
+                                          setCurrentModalDate(expense.date)
+                                          setEditingExpenseId(expense.id)
+                                          setShowExpenseModal(true)
+                                        }}
+                                        className="text-muted-foreground hover:text-foreground"
+                                      >
+                                        Edit
+                                      </Button>
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        onClick={() => deleteExpenseEntry(expense.id)}
+                                        className="text-muted-foreground hover:text-destructive"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          } else if (expense.type === 'cost') {
+                            return (
+                              <div key={`cost-${expense.id || index}`} className="bg-card border border-border rounded-lg p-3">
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center space-x-2 mb-2">
+                                      <span className="text-sm font-medium text-foreground">
+                                        {format(expenseDate, 'EEE, MMM d')}
+                                      </span>
+                                      <span className={clsx(
+                                        'px-2 py-1 text-xs rounded-full font-medium capitalize',
+                                        {
+                                          'bg-blue-100 text-blue-800': expense.type === 'car' || expense.type === 'taxi',
+                                          'bg-purple-100 text-purple-800': expense.type === 'hotel',
+                                          'bg-green-100 text-green-800': expense.type === 'meal',
+                                          'bg-gray-100 text-gray-800': expense.type === 'other',
+                                        }
+                                      )}>
+                                        {expense.type || 'Cost Entry'}
+                                      </span>
+                                      {expense.chargeable && (
+                                        <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800 font-medium">
+                                          Chargeable
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-sm text-muted-foreground mb-1">
+                                      <span className="font-medium">${expense.gross_amount.toFixed(2)}</span>
+                                      <span className="text-xs ml-1">(incl. {expense.vat_percentage}% VAT)</span>
+                                      {expense.distance_km && (
+                                        <span className="ml-3">{expense.distance_km} km</span>
+                                      )}
+                                    </div>
+                                    {expense.notes && (
+                                      <p className="text-sm text-muted-foreground">{expense.notes}</p>
+                                    )}
+                                  </div>
+                                  {!isReadOnly && (
+                                    <div className="flex items-center space-x-2 ml-4">
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        onClick={() => {
+                                          setCurrentModalDate(expense.date)
+                                          setEditingExpenseId(expense.id)
+                                          setShowExpenseModal(true)
+                                        }}
+                                        className="text-muted-foreground hover:text-foreground"
+                                      >
+                                        Edit
+                                      </Button>
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        onClick={() => deleteCostEntry(expense.id)}
+                                        className="text-muted-foreground hover:text-destructive"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          } else if (expense.type === 'travel') {
+                            return (
+                              <div key={`travel-${expense.id || index}`} className="bg-card border border-travel/20 rounded-lg p-3">
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center space-x-2 mb-2">
+                                      <span className="text-sm font-medium text-foreground">
+                                        {format(expenseDate, 'EEE, MMM d')}
+                                      </span>
+                                      <span className="px-2 py-1 text-xs rounded-full font-medium bg-travel/20 text-travel">
+                                        Travel Details
+                                      </span>
+                                    </div>
+                                    <div className="text-sm text-muted-foreground mb-2">
+                                      <div className="mb-1">
+                                        <span className="font-medium">Time:</span> {expense.start_time} - {expense.end_time}
+                                      </div>
+                                      <div className="mb-1">
+                                        <span className="font-medium">Route:</span> {expense.from_location} → {expense.to_location}
+                                      </div>
+                                      <div>
+                                        <span className="font-medium">Country:</span> {expense.country}
+                                      </div>
+                                    </div>
+                                    {expense.description && (
+                                      <p className="text-sm text-muted-foreground bg-muted/30 rounded px-2 py-1">
+                                        {expense.description}
+                                      </p>
+                                    )}
+                                  </div>
+                                  {!isReadOnly && (
+                                    <div className="flex items-center space-x-2 ml-4">
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        onClick={() => {
+                                          setCurrentModalDate(expense.date)
+                                          setEditingTravelExpenseId(expense.id)
+                                          setShowTravelExpenseModal(true)
+                                        }}
+                                        className="text-muted-foreground hover:text-foreground"
+                                      >
+                                        Edit
+                                      </Button>
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        onClick={() => deleteTravelExpenseEntry(expense.id)}
+                                        className="text-muted-foreground hover:text-destructive"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          }
+                          
+                          return null
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
         </div>
       </div>
       
@@ -1807,6 +2695,19 @@ export function TimesheetPage() {
           projects={projects}
           date={currentModalDate}
           editingExpense={editingExpenseId ? data.expenseEntries[currentModalDate]?.find(e => e.id === editingExpenseId) : undefined}
+        />
+      )}
+      
+      {/* Travel Expense Modal */}
+      {showTravelExpenseModal && (
+        <TravelExpenseModal
+          isOpen={showTravelExpenseModal}
+          onClose={closeModals}
+          onSave={saveTravelExpenseEntry}
+          projects={projects}
+          countries={countries}
+          date={currentModalDate}
+          defaultValues={editingTravelExpenseId ? data.travelExpenseEntries[currentModalDate]?.find(te => te.id === editingTravelExpenseId) : undefined}
         />
       )}
       

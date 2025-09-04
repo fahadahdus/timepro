@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Button } from '../components/ui/Button'
-import { Input } from '../components/ui/Input'
-import { Select } from '../components/ui/Select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { useAuth } from '../contexts/AuthContext'
 import { useNotifications } from '../contexts/NotificationContext'
 import { useCurrency } from '../contexts/CurrencyContext'
@@ -101,12 +101,21 @@ export function CountryRatesPage() {
         throw new Error('Rates must be positive numbers')
       }
       
+      // Get current session to ensure we have a valid token
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        throw new Error('No valid session token. Please log in again.')
+      }
+      
       // Call the update API endpoint
       const { data, error } = await supabase.functions.invoke('update-country-rates', {
         body: {
           countryId: countryToEdit.id,
           rateA: editingData.rate_a,
           rateB: editingData.rate_b
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
         }
       })
       
@@ -184,8 +193,8 @@ export function CountryRatesPage() {
           <Button
             variant="outline"
             onClick={loadCountryRates}
-            icon={<RefreshCw className="h-4 w-4" />}
           >
+            <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
         </div>
@@ -317,9 +326,9 @@ export function CountryRatesPage() {
                                 variant="success"
                                 onClick={saveCountryRate}
                                 loading={isSaving}
-                                icon={<Save className="h-3 w-3" />}
                                 className="text-xs"
                               >
+                                <Save className="h-3 w-3" />
                                 Save
                               </Button>
                               <Button

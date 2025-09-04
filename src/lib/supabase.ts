@@ -71,11 +71,19 @@ export interface DayEntry {
   date: string
   time_in: string | null
   time_out: string | null
-  status: 'active' | 'day_off' | 'vacation' | 'travel' | 'weekend_bank_holiday'
+  status: 'office' | 'active' | 'day_off' | 'vacation' | 'travel' | 'weekend' | 'bank_holiday'
   allowance_amount: number
   office: string | null
   city: string | null
   country: string | null
+  project_id: string | null
+  travel_start_time: string | null
+  travel_end_time: string | null
+  travel_from_location: string | null
+  travel_to_location: string | null
+  travel_custom_from_location: string | null
+  travel_custom_to_location: string | null
+  travel_description: string | null
   created_at: string
   updated_at: string
 }
@@ -135,6 +143,23 @@ export interface ExpenseEntry {
   distance_km: number | null
   rate_per_km: number | null
   receipt_uploaded: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface TravelExpenseEntry {
+  id: string
+  day_entry_id: string
+  project_id: string
+  start_time: string
+  end_time: string
+  from_location: string
+  to_location: string
+  custom_from_location: string | null
+  custom_to_location: string | null
+  country: string
+  description: string | null
+  allowance_amount: number
   created_at: string
   updated_at: string
 }

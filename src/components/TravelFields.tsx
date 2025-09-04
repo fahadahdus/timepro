@@ -1,6 +1,6 @@
 import React from 'react'
-import { Input } from './ui/Input'
-import { Select } from './ui/Select'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { clsx } from 'clsx'
 
 interface Country {
@@ -10,6 +10,21 @@ interface Country {
   vat_rate: string
   currency_code: string
   is_active: boolean
+}
+
+interface Project {
+  id: string
+  client_id: string
+  code: string
+  name: string
+  billing_type: 'time_and_material' | 'fixed_price'
+  budget_days: number
+  budget_amount: number
+  hourly_rate: number
+  travel_billable: boolean
+  active: boolean
+  created_at: string
+  updated_at: string
 }
 
 const OFFICE_LOCATIONS = [
@@ -26,11 +41,19 @@ interface TravelFieldsProps {
   office?: string
   city?: string
   country?: string
+  projectId?: string
   countries: Country[]
+  projects: Project[]
   citySuggestions: string[]
   isMobile: boolean
   isReadOnly: boolean
   onChange: (field: string, value: string) => void
+  smartDefaults?: {
+    lastOffice: string
+    lastCity: string
+    lastCountry: string
+    recentOffices: string[]
+  }
 }
 
 export function TravelFields({ 
@@ -38,12 +61,30 @@ export function TravelFields({
   office, 
   city, 
   country, 
+  projectId, 
   countries, 
+  projects, 
   citySuggestions, 
   isMobile, 
   isReadOnly, 
-  onChange 
+  onChange,
+  smartDefaults 
 }: TravelFieldsProps) {
+  
+  // Auto-populate fields with smart defaults when they're empty
+  React.useEffect(() => {
+    if (!isReadOnly && smartDefaults) {
+      if (!office && smartDefaults.lastOffice) {
+        onChange('office', smartDefaults.lastOffice)
+      }
+      if (!city && smartDefaults.lastCity) {
+        onChange('city', smartDefaults.lastCity)
+      }
+      if (!country && smartDefaults.lastCountry) {
+        onChange('country', smartDefaults.lastCountry)
+      }
+    }
+  }, [office, city, country, smartDefaults, onChange, isReadOnly])
   return (
     <div className={clsx(
       "bg-muted/20 rounded-lg p-3 space-y-3 mt-3",
@@ -60,9 +101,31 @@ export function TravelFields({
         "grid gap-3",
         {
           "grid-cols-1": isMobile,
-          "grid-cols-3": !isMobile
+          "grid-cols-2 lg:grid-cols-4": !isMobile
         }
       )}>
+        <Select
+          value={projectId || ''}
+          onChange={(e) => onChange('project_id', e.target.value)}
+          className={clsx(
+            "premium-focus",
+            {
+              "w-full": isMobile,
+            }
+          )}
+          disabled={isReadOnly}
+          onClick={(e) => e.stopPropagation()}
+          options={[
+            { value: '', label: 'Select project...' },
+            ...projects.map(project => ({
+              value: project.id,
+              label: `${project.code} - ${project.name}`
+            }))
+          ]}
+          label={isMobile ? "Project *" : undefined}
+          variant={isMobile ? "floating" : "default"}
+          required
+        />
         <Select
           value={office || ''}
           onChange={(e) => onChange('office', e.target.value)}
@@ -122,7 +185,7 @@ export function TravelFields({
         />
       </div>
       <p className="text-xs text-muted-foreground">
-        Specify travel destination for allowance calculations
+        <span className="font-medium text-orange-600">Project selection is required</span> for travel days to associate daily allowance with project costs.
       </p>
     </div>
   )

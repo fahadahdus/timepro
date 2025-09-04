@@ -249,7 +249,7 @@ export function TimeAllocationInput({
       <div className="relative">
         <div
           className={clsx(
-            'modern-input cursor-pointer flex items-center justify-between',
+            'modern-input cursor-pointer flex items-center justify-between min-h-[3rem]',
             {
               'border-destructive focus-within:border-destructive focus-within:ring-destructive/20': error,
               'opacity-50 cursor-not-allowed': disabled,
@@ -274,7 +274,7 @@ export function TimeAllocationInput({
                 disabled={disabled}
               />
             ) : (
-              <span>{displayValue}</span>
+              <span className="block py-2">{displayValue}</span>
             )}
           </div>
           <ChevronDown 

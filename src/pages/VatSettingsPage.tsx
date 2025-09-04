@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Button } from '../components/ui/Button'
-import { Input } from '../components/ui/Input'
-import { Select } from '../components/ui/Select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { useAuth } from '../contexts/AuthContext'
 import { useNotifications } from '../contexts/NotificationContext'
 import { supabase } from '../lib/supabase'
@@ -31,17 +31,17 @@ interface EditingState {
 }
 
 const EXPENSE_TYPE_LABELS: Record<string, string> = {
-  train: 'Train Travel',
-  taxi: 'Taxi Services',
-  flight: 'Flight Expenses',
+  train: 'Train',
+  taxi: 'Taxi',
+  flight: 'Flight',
   rental_car: 'Rental Car',
-  fuel: 'Fuel Expenses',
-  parking: 'Parking Fees',
-  onpv: 'Public Transport (ÖNPV)',
+  fuel: 'Fuel',
+  parking: 'Parking',
+  onpv: 'ÖNPV',
   hospitality: 'Hospitality',
-  others: 'Other Expenses',
-  hotel: 'Hotel Accommodation',
-  car: 'Car Mileage'
+  hotel: 'Hotel',
+  car: 'Car (Mileage)',
+  others: 'Others'
 }
 
 export function VatSettingsPage() {
@@ -70,7 +70,24 @@ export function VatSettingsPage() {
         throw new Error(data.error || 'Failed to load VAT settings')
       }
       
-      setVatSettings(data.data)
+      // Ensure available_rates is always an array and filter out expense types not available to consultants
+      const processedSettings = data.data
+        .filter((setting: any) => setting.expense_type !== 'travel') // Hide travel expense type since it's not available to consultants
+        .map((setting: any) => ({
+          ...setting,
+          available_rates: Array.isArray(setting.available_rates) 
+            ? setting.available_rates 
+            : (typeof setting.available_rates === 'string' 
+              ? JSON.parse(setting.available_rates) 
+              : [setting.default_vat_rate])
+        }))
+        // Sort by the order they appear in consultant forms
+        .sort((a: any, b: any) => {
+          const order = ['train', 'taxi', 'flight', 'rental_car', 'fuel', 'parking', 'onpv', 'hospitality', 'hotel', 'car', 'others'];
+          return order.indexOf(a.expense_type) - order.indexOf(b.expense_type);
+        })
+      
+      setVatSettings(processedSettings)
     } catch (error) {
       console.error('Error loading VAT settings:', error)
       addNotification({ type: 'error', title: 'Failed to load VAT settings' })
@@ -86,7 +103,9 @@ export function VatSettingsPage() {
     setEditingData({
       expense_type: setting.expense_type,
       default_vat_rate: setting.default_vat_rate,
-      available_rates: setting.available_rates,
+      available_rates: Array.isArray(setting.available_rates) 
+        ? setting.available_rates 
+        : [setting.default_vat_rate],
       description: setting.description || ''
     })
   }
@@ -106,12 +125,21 @@ export function VatSettingsPage() {
         throw new Error('VAT rate must be between 0 and 100')
       }
       
+      // Get current session to ensure we have a valid token
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        throw new Error('No valid session token. Please log in again.')
+      }
+      
       const { data, error } = await supabase.functions.invoke('update-vat-settings', {
         body: {
           expense_type: editingData.expense_type,
           default_vat_rate: editingData.default_vat_rate,
           available_rates: editingData.available_rates,
           description: editingData.description
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
         }
       })
       
@@ -203,8 +231,8 @@ export function VatSettingsPage() {
         <Button
           variant="outline"
           onClick={loadVatSettings}
-          icon={<RefreshCw className="h-4 w-4" />}
         >
+          <RefreshCw className="h-4 w-4" />
           Refresh
         </Button>
       </div>
@@ -328,7 +356,7 @@ export function VatSettingsPage() {
                           </div>
                         ) : (
                           <div className="flex flex-wrap gap-1">
-                            {setting.available_rates.map((rate) => (
+                            {(Array.isArray(setting.available_rates) ? setting.available_rates : [setting.default_vat_rate]).map((rate) => (
                               <span 
                                 key={rate}
                                 className={clsx(
@@ -391,9 +419,9 @@ export function VatSettingsPage() {
                                 variant="success"
                                 onClick={saveVatSetting}
                                 loading={isSaving}
-                                icon={<Save className="h-3 w-3" />}
                                 className="text-xs"
                               >
+                                <Save className="h-3 w-3" />
                                 Save
                               </Button>
                               <Button
